@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ticket Workspace - TKT-4821</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom subtle scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="h-full w-full bg-slate-100 text-slate-800 font-sans flex flex-col overflow-hidden antialiased select-none">
+
+  <!-- TOP BAR (Full width, fixed height, spanning all panes) -->
+  <header class="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 z-20 shadow-xs">
+    <!-- Left Section: Back, Ticket ID, Subject, State, SLA -->
+    <div class="flex items-center space-x-3 overflow-hidden">
+      <button class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-800 transition-colors shrink-0" title="Back to Tickets">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+        </svg>
+      </button>
+
+      <div class="flex items-center space-x-2 shrink-0">
+        <span class="font-mono font-semibold text-xs text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">TKT-4821</span>
+      </div>
+
+      <div class="h-4 w-px bg-slate-200 shrink-0"></div>
+
+      <h1 class="text-sm font-semibold text-slate-900 truncate max-w-xs md:max-w-md" title="Paid but no delivery date">
+        Paid but no delivery date
+      </h1>
+
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
+        <span class="w-1.5 h-1.5 rounded-full bg-blue-500 mr-1.5 animate-pulse"></span>
+        In Progress
+      </span>
+
+      <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-300 shrink-0">
+        <svg class="w-3.5 h-3.5 mr-1 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        First response 2h left
+      </div>
+    </div>
+
+    <!-- Right Section: Assignee Avatar, Resolve Button, Overflow Menu -->
+    <div class="flex items-center space-x-3 shrink-0">
+      <div class="flex items-center space-x-2 pl-2 border-l border-slate-200">
+        <div class="relative group cursor-pointer">
+          <div class="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-semibold text-xs shadow-xs border border-white">
+            AR
+          </div>
+          <span class="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-white"></span>
+        </div>
+        <span class="text-xs font-medium text-slate-600 hidden sm:inline">Ananya R.</span>
+      </div>
+
+      <button class="inline-flex items-center px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs font-medium rounded-lg shadow-sm transition-all focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1">
+        <svg class="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        </svg>
+        Resolve
+      </button>
+
+      <button class="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors" title="More options">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN THREE-PANE CONTAINER (No page scroll, 100% height minus header) -->
+  <main class="flex-1 flex overflow-hidden">
+
+    <!-- LEFT PANE (300px, Independent Scroll) — Ticket context -->
+    <aside class="w-[300px] shrink-0 bg-white border-r border-slate-200 flex flex-col h-full overflow-hidden">
+      <!-- Scrollable content area -->
+      <div class="flex-1 overflow-y-auto p-3.5 space-y-3.5">
+        
+        <!-- Customer Card -->
+        <section class="bg-slate-50/80 rounded-xl p-3 border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold tracking-wider uppercase text-slate-400">Customer Details</span>
+            <span class="w-2 h-2 rounded-full bg-emerald-500" title="Verified Customer"></span>
+          </div>
+          <div class="flex items-start space-x-2.5">
+            <div class="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-semibold text-xs shrink-0">
+              VS
+            </div>
+            <div class="min-w-0 flex-1">
+              <h2 class="text-xs font-bold text-slate-900 truncate">Vikram Sharma</h2>
+              <p class="text-[11px] text-slate-500 font-mono mt-0.5">+91 98201 44102</p>
+              <p class="text-[11px] text-slate-500 flex items-center mt-0.5">
+                <svg class="w-3 h-3 mr-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Pune, Maharashtra
+              </p>
+            </div>
+          </div>
+          <div class="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between">
+            <a href="#" class="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 flex items-center transition-colors">
+              <span>3 previous tickets</span>
+              <svg class="w-3 h-3 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+              </svg>
+            </a>
+            <span class="text-[10px] text-slate-400">Since Jan 2022</span>
+          </div>
+        </section>
+
+        <!-- Linked Order Card -->
+        <section class="bg-slate-50/80 rounded-xl p-3 border border-slate-200/80 shadow-2xs">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold tracking-wider uppercase text-slate-400">Linked Order</span>
+            <span class="font-mono text-[11px] font-semibold text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200">#1289</span>
+          </div>
+          
+          <div class="space-y-1.5">
+            <div>
+              <p class="text-[11px] text-slate-400">Vehicle</p>
+              <p class="text-xs font-semibold text-slate-800">2019 Maruti Swift VXI</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <div>
+                <p class="text-[10px] text-slate-400">Reg No</p>
+                <p class="text-xs font-mono font-medium text-slate-700">MH12AB1234</p>
+              </div>
+              <div>
+                <p class="text-[10px] text-slate-400">Amount</p>
+                <p class="text-xs font-semibold text-slate-900 font-mono">₹6.2L</p>
+              </div>
+            </div>
+
+            <div class="pt-2 flex items-center justify-between">
+              <span class="text-[10px] text-slate-400">Order State</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                FULL_PAID
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Vertical Timeline of Customer Messages -->
+        <section class="pt-1">
+          <div class="flex items-center justify-between mb-2 px-0.5">
+            <span class="text-[10px] font-bold tracking-wider uppercase text-slate-400">Customer Thread</span>
+            <span class="text-[10px] text-slate-400">3 messages</span>
+          </div>
+
+          <!-- Label above first message -->
+          <div class="mb-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 text-[10px] font-medium text-amber-800 flex items-center">
+            <svg class="w-3 h-3 mr-1 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            Customer message — read only
+          </div>
+
+          <!-- Timeline items -->
+          <div class="relative pl-4 space-y-3.5 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+            
+            <!-- Message 1 -->
+            <div class="relative group">
+              <!-- Channel Dot/Icon -->
+              <span class="absolute -left-4 top-1 w-3.5 h-3.5 rounded-full bg-emerald-600 flex items-center justify-center text-white ring-2 ring-white shadow-2xs" title="WhatsApp">
+                <svg class="w-2 h-2 fill-current" viewBox="0 0 24 24">
+                  <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.711 2.598 2.664-.698c.969.586 1.761.885 2.796.885 3.181 0 5.767-2.587 5.768-5.766 0-3.18-2.587-5.772-5.768-5.772zm3.393 8.243c-.144.405-.837.774-1.17.824-.312.045-.694.072-2.029-.481-1.616-.669-2.658-2.315-2.738-2.423-.081-.108-.654-.87-.654-1.657 0-.787.413-1.173.56-1.332.146-.159.32-.199.426-.199.106 0 .213.002.305.008.098.006.228-.037.357.273.132.319.452 1.104.492 1.185.04.081.066.177.013.283-.053.106-.08.172-.159.266-.08.093-.167.208-.239.28-.08.08-.163.167-.07.327.094.159.418.69 1 1.208.749.667 1.381.874 1.579.972.199.099.317.086.435-.05.118-.135.505-.589.638-.792.133-.203.266-.17.447-.102.181.068 1.147.541 1.345.64.199.099.332.148.38.232.048.084.048.487-.096.892z" />
+                </svg>
+              </span>
+
+              <div class="bg-slate-100 rounded-lg p-2.5 border border-slate-200">
+                <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                  <span class="font-medium text-slate-700 flex items-center">
+                    <span class="text-emerald-700 mr-1">WhatsApp</span>
+                  </span>
+                  <span>Yesterday, 16:42</span>
+                </div>
+                <p class="text-xs text-slate-700 leading-relaxed">
+                  Hi, I completed full payment of ₹6.2L yesterday morning itself. When will the Swift be delivered to Pune?
+                </p>
+              </div>
+            </div>
+
+            <!-- Message 2 -->
+            <div class="relative group">
+              <span class="absolute -left-4 top-1 w-3.5 h-3.5 rounded-full bg-blue-600 flex items-center justify-center text-white ring-2 ring-white shadow-2xs" title="Email">
+                <svg class="w-2 h-2 fill-none stroke-currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              </span>
+
+              <div class="bg-slate-100 rounded-lg p-2.5 border border-slate-200">
+                <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                  <span class="font-medium text-slate-700 flex items-center">
+                    <span class="text-blue-700 mr-1">Email</span>
+                  </span>
+                  <span>Today, 09:15</span>
+                </div>
+                <p class="text-xs text-slate-700 leading-relaxed">
+                  Still no update or delivery date on the app. Need delivery date confirmed today as I have travel scheduled.
+                </p>
+              </div>
+            </div>
+
+            <!-- Message 3 -->
+            <div class="relative group">
+              <span class="absolute -left-4 top-1 w-3.5 h-3.5 rounded-full bg-emerald-600 flex items-center justify-center text-white ring-2 ring-white shadow-2xs" title="WhatsApp">
+                <svg class="w-2 h-2 fill-current" viewBox="0 0 24 24">
+                  <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.711 2.598 2.664-.698c.969.586 1.761.885 2.796.885 3.181 0 5.767-2.587 5.768-5.766 0-3.18-2.587-5.772-5.768-5.772zm3.393 8.243c-.144.405-.837.774-1.17.824-.312.045-.694.072-2.029-.481-1.616-.669-2.658-2.315-2.738-2.423-.081-.108-.654-.87-.654-1.657 0-.787.413-1.173.56-1.332.146-.159.32-.199.426-.199.106 0 .213.002.305.008.098.006.228-.037.357.273.132.319.452 1.104.492 1.185.04.081.066.177.013.283-.053.106-.08.172-.159.266-.08.093-.167.208-.239.28-.08.08-.163.167-.07.327.094.159.418.69 1 1.208.749.667 1.381.874 1.579.972.199.099.317.086.435-.05.118-.135.505-.589.638-.792.133-.203.266-.17.447-.102.181.068 1.147.541 1.345.64.199.099.332.148.38.232.048.084.048.487-.096.892z" />
+                </svg>
+              </span>
+
+              <div class="bg-slate-100 rounded-lg p-2.5 border border-slate-200">
+                <div class="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                  <span class="font-medium text-slate-700 flex items-center">
+                    <span class="text-emerald-700 mr-1">WhatsApp</span>
+                  </span>
+                  <span>Today, 11:30</span>
+                </div>
+                <p class="text-xs text-slate-700 leading-relaxed">
+                  Please reply. Is there any issue with my payment verification?
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+      </div>
+
+      <!-- Collapsed Section Header at bottom -->
+      <div class="p-3 border-t border-slate-200 bg-slate-50">
+        <button class="w-full flex items-center justify-between text-xs font-semibold text-slate-700 hover:text-slate-900 transition-colors group">
+          <span class="flex items-center">
+            <svg class="w-3.5 h-3.5 mr-2 text-slate-400 group-hover:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+            Order state timeline (9 events)
+          </span>
+          <span class="text-[10px] font-mono text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">Collapsed</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- CENTRE PANE (Flexible, Widest, Independent Scroll) — Copilot conversation -->
+    <section class="flex-1 min-w-[480px] bg-slate-50/50 flex flex-col h-full border-r border-slate-200 overflow-hidden">
+      
+      <!-- Copilot Header -->
+      <div class="h-12 bg-white/90 backdrop-blur-xs border-b border-slate-200 px-5 flex items-center justify-between shrink-0">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-6 h-6 rounded-md bg-gradient-to-tr from-violet-600 to-indigo-600 flex items-center justify-center text-white shadow-2xs">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <span class="text-xs font-bold text-slate-900 tracking-tight">Copilot</span>
+          <span class="font-mono text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full">sonnet</span>
+          <span class="font-mono text-[10px] text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">1.2s</span>
+        </div>
+
+        <div class="flex items-center space-x-2 text-xs text-slate-400">
+          <span class="flex items-center text-[11px]">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
+            Sync active
+          </span>
+        </div>
+      </div>
+
+      <!-- Chat Transcript Area (Scrollable) -->
+      <div class="flex-1 overflow-y-auto p-5 space-y-5">
+        
+        <!-- Agent Message (Right-aligned plain text) -->
+        <div class="flex justify-end">
+          <div class="max-w-md bg-indigo-600 text-white text-xs leading-relaxed px-4 py-2.5 rounded-2xl rounded-tr-xs shadow-xs">
+            Customer is asking why delivery date isn't scheduled even though payment is complete. What is holding it up?
+          </div>
+        </div>
+
+        <!-- Copilot Answer Card 1 (Left-aligned structured card) -->
+        <div class="flex justify-start">
+          <div class="max-w-2xl w-full bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3.5">
+            
+            <!-- 1. One-line verdict -->
+            <div class="flex items-center space-x-2">
+              <span class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
+              <p class="text-sm font-medium text-slate-900">
+                Payment is fine. Delivery is blocked on RC transfer.
+              </p>
+            </div>
+
+            <!-- 2. Diagnosis strip: three small boxes side by side -->
+            <div class="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200/80">
+              <div class="border-r border-slate-200 pr-2">
+                <div class="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Expected</div>
+                <div class="font-mono text-xs font-semibold text-slate-700 mt-0.5 truncate">DISPATCH_SCHEDULED</div>
+              </div>
+              <div class="border-r border-slate-200 pr-2">
+                <div class="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Observed</div>
+                <div class="font-mono text-xs font-semibold text-emerald-700 mt-0.5 truncate">FULL_PAID</div>
+              </div>
+              <div>
+                <div class="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Stuck</div>
+                <div class="font-mono text-xs font-bold text-rose-600 mt-0.5">62h</div>
+              </div>
+            </div>
+
+            <!-- 3. Rule chip row: red pill and grey pill -->
+            <div class="flex items-center space-x-2">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-mono font-medium bg-rose-50 text-rose-700 border border-rose-200">
+                <span class="w-1.5 h-1.5 rounded-full bg-rose-500 mr-1.5"></span>
+                rc_transfer_stall v2
+              </span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-mono font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                confidence 0.91
+              </span>
+            </div>
+
+            <!-- 4. Two or three sentences of explanation -->
+            <div class="text-xs text-slate-600 leading-relaxed">
+              Order #1289 transitioned to <span class="font-mono text-slate-800 font-medium">FULL_PAID</span> 62 hours ago, clearing payment gateway audit with zero discrepancies. However, the dispatch automated workflow has halted because the Regional Transport Office (RTO) transfer record requires an uploaded NOC from the previous owner. Without this document clearance, vehicle handover cannot be legally scheduled.
+            </div>
+
+            <!-- 5. Evidence row: three small chips with link icons -->
+            <div class="pt-1">
+              <div class="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Cited Evidence</div>
+              <div class="flex flex-wrap gap-2">
+                <button class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 transition-colors group">
+                  <svg class="w-3 h-3 mr-1.5 text-slate-400 group-hover:text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  payment #P-9912
+                </button>
+
+                <button class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 transition-colors group">
+                  <svg class="w-3 h-3 mr-1.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  rc_case RC-8821
+                  <span class="ml-1.5 w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                </button>
+
+                <button class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-200 transition-colors group">
+                  <svg class="w-3 h-3 mr-1.5 text-slate-400 group-hover:text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  order_event #7
+                </button>
+              </div>
+            </div>
+
+            <!-- 6. Footer row of buttons -->
+            <div class="pt-2 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+              <div class="flex items-center space-x-2">
+                <button class="px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                  Show trace
+                </button>
+                <button class="px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors">
+                  Draft reply
+                </button>
+              </div>
+
+              <button class="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-2xs transition-colors">
+                <svg class="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+                Propose action: Escalate to RTO
+              </button>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Agent Message 2 (Right-aligned plain text) -->
+        <div class="flex justify-end">
+          <div class="max-w-md bg-indigo-600 text-white text-xs leading-relaxed px-4 py-2.5 rounded-2xl rounded-tr-xs shadow-xs">
+            Can we expedite delivery under the 1-year comprehensive warranty SLA clause?
+          </div>
+        </div>
+
+        <!-- Copilot Message 2: Refusal State (Grey card, italic refusal, muted pill) -->
+        <div class="flex justify-start">
+          <div class="max-w-xl w-full bg-slate-100/90 rounded-xl border border-slate-200 p-3.5 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-200 text-slate-600">
+                Insufficient data
+              </span>
+              <span class="text-[10px] text-slate-400 font-mono">eval_code: SKU_MISMATCH</span>
+            </div>
+
+            <p class="text-xs text-slate-700 italic">
+              "No data supports this — the order has no warranty SKU."
+            </p>
+
+            <div class="flex items-center space-x-2 pt-1">
+              <button class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono bg-white text-slate-600 border border-slate-200 hover:border-slate-300">
+                <svg class="w-2.5 h-2.5 mr-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                order_item #1289-A
+              </button>
+              <button class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono bg-white text-slate-600 border border-slate-200 hover:border-slate-300">
+                <svg class="w-2.5 h-2.5 mr-1 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                catalog_warranty_check
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Message Composer & Suggestion Chips at bottom -->
+      <div class="p-4 bg-white border-t border-slate-200 shrink-0 space-y-2.5">
+        <!-- Three suggestion chips -->
+        <div class="flex items-center space-x-2 overflow-x-auto pb-0.5">
+          <button class="shrink-0 text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors">
+            ✨ Full status summary
+          </button>
+          <button class="shrink-0 text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors">
+            🔍 Why is this stuck?
+          </button>
+          <button class="shrink-0 text-xs px-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors">
+            ✉️ Draft customer reply
+          </button>
+        </div>
+
+        <!-- Input Box -->
+        <div class="relative flex items-center">
+          <input 
+            type="text" 
+            placeholder="Ask about this ticket…" 
+            class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-12 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-indigo-500 focus:bg-white focus:ring-1 focus:ring-indigo-500 transition-all shadow-2xs"
+          />
+          <button class="absolute right-2 p-1.5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white rounded-lg transition-colors shadow-xs" title="Send query">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- RIGHT PANE (340px, Independent Scroll) — Evidence -->
+    <aside class="w-[340px] shrink-0 bg-white flex flex-col h-full overflow-hidden">
+      
+      <!-- Top Segmented Control (Evidence [active], Records, Trace) -->
+      <div class="p-3 border-b border-slate-200 shrink-0">
+        <div class="bg-slate-100 p-0.5 rounded-lg grid grid-cols-3 gap-0.5 text-xs font-medium">
+          <button class="py-1.5 text-center rounded-md bg-white text-slate-900 shadow-2xs font-semibold">
+            Evidence
+          </button>
+          <button class="py-1.5 text-center rounded-md text-slate-500 hover:text-slate-800 transition-colors">
+            Records
+          </button>
+          <button class="py-1.5 text-center rounded-md text-slate-500 hover:text-slate-800 transition-colors">
+            Trace
+          </button>
+        </div>
+      </div>
+
+      <!-- Under Evidence: List of exact cited records (Scrollable) -->
+      <div class="flex-1 overflow-y-auto p-3.5 space-y-3">
+        
+        <div class="flex items-center justify-between px-0.5">
+          <span class="text-[10px] font-bold tracking-wider uppercase text-slate-400">Cited in current turn (3)</span>
+          <span class="text-[10px] text-indigo-600 font-medium cursor-pointer hover:underline">Expand all</span>
+        </div>
+
+        <!-- Card 1: payment -->
+        <div class="rounded-lg border border-slate-200 bg-slate-50/60 p-3 shadow-2xs hover:border-slate-300 transition-colors">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-200/60">
+            <div class="flex items-center space-x-1.5">
+              <span class="font-mono text-[11px] font-bold text-slate-700">payment</span>
+              <span class="text-[10px] font-mono text-slate-400">#P-9912</span>
+            </div>
+            <span class="text-[10px] font-mono font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">VERIFIED</span>
+          </div>
+
+          <div class="mt-2 space-y-1.5 font-mono text-[11px]">
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-400 text-[10px]">amount</span>
+              <span class="text-slate-800 font-medium">INR 620,000.00</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-400 text-[10px]">gateway_status</span>
+              <span class="text-slate-800 font-medium">SUCCESS_SETTLED</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-400 text-[10px]">method</span>
+              <span class="text-slate-700">HDFC_NETBANKING</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-400 text-[10px]">timestamp</span>
+              <span class="text-slate-600 text-[10px]">2023-10-24 10:14:02 IST</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: rc_case (Trigger rule with highlight in amber) -->
+        <div class="rounded-lg border-2 border-amber-400 bg-amber-50/40 p-3 shadow-2xs relative">
+          <div class="absolute -top-2 right-2 px-1.5 py-0.2 bg-amber-500 text-white rounded text-[9px] font-bold tracking-wider uppercase shadow-2xs">
+            Trigger Field
+          </div>
+
+          <div class="flex items-center justify-between pb-2 border-b border-amber-200/60">
+            <div class="flex items-center space-x-1.5">
+              <span class="font-mono text-[11px] font-bold text-slate-900">rc_case</span>
+              <span class="text-[10px] font-mono text-amber-800 font-semibold">RC-8821</span>
+            </div>
+            <span class="text-[10px] font-mono font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded">STALLED</span>
+          </div>
+
+          <div class="mt-2 space-y-1.5 font-mono text-[11px]">
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-500 text-[10px]">rto_office</span>
+              <span class="text-slate-800 font-medium">MH-12 (PUNE_CENTRAL)</span>
+            </div>
+            
+            <!-- Highlighting trigger in amber -->
+            <div class="bg-amber-100/90 border border-amber-300 rounded p-1.5 flex justify-between items-baseline">
+              <span class="text-amber-900 font-semibold text-[10px]">blocked_reason</span>
+              <span class="text-amber-950 font-bold bg-amber-200/80 px-1 rounded">"seller_noc_missing"</span>
+            </div>
+
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-500 text-[10px]">assigned_agent</span>
+              <span class="text-slate-700">rto_desk_team_3</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-500 text-[10px]">days_pending</span>
+              <span class="text-rose-600 font-semibold">2.6 days</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: order_event -->
+        <div class="rounded-lg border border-slate-200 bg-slate-50/60 p-3 shadow-2xs hover:border-slate-300 transition-colors">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-200/60">
+            <div class="flex items-center space-x-1.5">
+              <span class="font-mono text-[11px] font-bold text-slate-700">order_event</span>
+              <span class="text-[10px] font-mono text-slate-400">#7</span>
+            </div>
+            <span class="text-[10px] font-mono text-slate-500">EVENT_EMITTED</span>
+          </div>
+
+          <div class="mt-2 space-y-1.5 font-mono text-[11px]">
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-400 text-[10px]">event_name</span>
+              <span class="text-slate-800 font-medium">PAYMENT_RECONCILED</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-400 text-[10px]">prev_state</span>
+              <span class="text-slate-700">TOKEN_PAID</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-400 text-[10px]">next_target</span>
+              <span class="text-indigo-600 font-medium">DISPATCH_SCHEDULED</span>
+            </div>
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-400 text-[10px]">automated_rule</span>
+              <span class="text-slate-600 text-[10px]">auto_advance_v4</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Footnote at bottom in small grey text -->
+      <div class="p-3 border-t border-slate-200 bg-slate-50/80 shrink-0">
+        <p class="text-[11px] text-slate-500 leading-normal">
+          Showing 3 cited records. Switch to <span class="font-medium text-slate-700 underline cursor-pointer">Records</span> for all data linked to this ticket.
+        </p>
+      </div>
+
+    </aside>
+
+  </main>
+
+</body>
+</html>

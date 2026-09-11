@@ -1,0 +1,69 @@
+@import 'tailwindcss';
+
+/**
+ * Tailwind v4, CSS-first config. v4 rather than v3 because that is what Stitch
+ * emits — its exports use shadow-xs / outline-hidden / blur-xs, which do not
+ * exist in v3 and would silently no-op.
+ *
+ * Tokens below mirror the design-system preamble in docs/STITCH_PROMPTS.md.
+ * Stitch settled on Tailwind's slate ramp plus a brand scale, so both are
+ * defined here and the exports paste in unchanged.
+ */
+@theme {
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Accent — matches the #4F46E5 in the design system. */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+
+  /* Named design-system tokens. Prefer these in hand-written components. */
+  --color-canvas: #f7f8fa;
+  --color-hairline: #e4e7ec;
+  --color-accent: #4f46e5;
+  --color-healthy: #059669;
+  --color-atrisk: #d97706;
+  --color-breached: #dc2626;
+  --color-muted: #6b7280;
+
+  --text-meta: 12px;
+  --text-meta--line-height: 16px;
+  --text-body: 13px;
+  --text-body--line-height: 18px;
+  --text-head: 15px;
+  --text-head--line-height: 20px;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-slate-100 text-body text-slate-800 antialiased;
+  }
+  /* Tabular numerals for IDs, amounts, timestamps — per the design system. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Subtle scrollbars, carried over from the Stitch export. */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

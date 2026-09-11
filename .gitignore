@@ -1,0 +1,14 @@
+# Secrets. .env.example is committed; .env never is.
+.env
+.env.local
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+node_modules/
+ui/dist/
+.vite/
+
+.DS_Store

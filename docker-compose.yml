@@ -1,0 +1,107 @@
+# Local stack. Today: Postgres + the UI. The API service is stubbed below and
+# gets uncommented when the backend exists — the network, the volume and the
+# database contract do not change when it does.
+#
+#   docker compose up            # db + ui
+#   docker compose up db         # database only
+#   docker compose down -v       # reset, including the seed
+#
+# The seed is deterministic (C7), so `down -v` then `up` reproduces the exact
+# same dataset. That is what makes the evals repeatable.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: copilot-db
+    environment:
+      POSTGRES_DB: copilot
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # Deterministic collation. Sort order affects cohort output.
+      POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+    ports:
+      # Override when a local Postgres already owns 5432:
+      #   POSTGRES_PORT=55432 docker compose up db
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      # Runs 00_roles → 01_schema → 02_rls → 03_seed, in name order, once on an
+      # empty volume. Re-running requires `down -v`.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d copilot']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: copilot-ui
+    environment:
+      # Service name, not localhost — localhost in a container is the container.
+      VITE_API_TARGET: http://api:8000
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - '${UI_PORT:-5173}:5173'
+    volumes:
+      - ./ui:/app
+      # Keep the image's node_modules; do not let the host's shadow it.
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+  # ---------------------------------------------------------------------------
+  # API.
+  #
+  # Connects as app_user, never as postgres: RLS is bypassed by superusers and
+  # table owners, so connecting as either would make every isolation test pass
+  # for the wrong reason. docs/DOMAIN_v2.md §6.
+  #
+  # The readonly URL is a separate role for the query console: SELECT only, 5s
+  # statement timeout, and it can read nothing the caller could not already see.
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: copilot-api
+    # Secrets come from .env on the host and are never baked into the image.
+    # Absent .env, the defaults below keep the stack on the fake adapter.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://app_user:app_user@db:5432/copilot
+      READONLY_DATABASE_URL: postgres://app_readonly:app_readonly@db:5432/copilot
+      DEFAULT_ACTOR: ${DEFAULT_ACTOR:-u_priya}
+      # `fake` unless .env says otherwise: a clone with no API key must boot,
+      # serve the console and pass evals. docs/INVARIANTS.md C6.
+      MODEL_ADAPTER: ${MODEL_ADAPTER:-fake}
+      SARVAM_API_KEY: ${SARVAM_API_KEY:-}
+      SARVAM_BASE_URL: ${SARVAM_BASE_URL:-https://api.sarvam.ai/v1}
+      SARVAM_MODEL: ${SARVAM_MODEL:-sarvam-105b}
+      # Must match `t0` in db/init/03_seed.sql, or the fixed-clock seed drifts
+      # out from under the rules as real time passes. See api/app/clock.py.
+      APP_CLOCK: ${APP_CLOCK:-2026-09-10T12:00:00+05:30}
+      # Tracing. Absent keys mean the exporter is never constructed, so this
+      # stack runs identically with or without Langfuse present.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://host.docker.internal:3000}
+    extra_hosts:
+      # Langfuse runs as a separate compose project (their repo, their
+      # versions), so the API reaches it through the host rather than a shared
+      # network. Keeping it out of this file means their schema migrations are
+      # never our problem.
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '${API_PORT:-8000}:8000'
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
