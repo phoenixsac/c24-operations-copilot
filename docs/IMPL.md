@@ -11,14 +11,16 @@ can be referenced directly ("do CORE-4").
 |---|---|---|
 | INF · Infrastructure | 5 | 5 |
 | DB · Data layer | 8 | 8 |
-| API · Transport | 13 | 13 |
+| API · Transport | 12 | 13 |
 | CORE · Deterministic core | 10 | 10 |
 | AGT · Agentic | 7 | 7 |
-| MDL · Model boundary | 5 | 8 |
+| MDL · Model boundary | 4 | 8 |
 | EVAL · Eval harness | 7 | 7 |
 | UI · Console | 11 | 11 |
-| OBS · Trace & budgets | 1 | 5 |
-| **Total** | **71** | **73** |
+| OBS · Trace & budgets | 3 | 6 |
+| **Total** | **67** | **75** |
+
+Done = ✅ rows only; 🟡 counts toward Total but not Done.
 
 ---
 
@@ -38,14 +40,14 @@ can be referenced directly ("do CORE-4").
 
 | ID | Item | Status | Inv. |
 |---|---|---|---|
-| DB-1 | Schema: 11 entities + `action_audit` (12 tables) + conversation pair | ✅ | — |
+| DB-1 | Schema: 11 entities + `action_audit` (12 tables) + conversation pair + `app_actor` = 15 tables total | ✅ | — |
 | DB-2 | `ticket_message` — thread, per-message untrusted flag | ✅ | J5 |
 | DB-3 | `conversation` + `conversation_turn` — 4 memory components | ✅ | §7 |
 | DB-4 | Three roles: `app_user`, `app_readonly`, `app_migrator` | ✅ | E7 |
-| DB-5 | RLS policies + `FORCE` on 13 scoped tables | ✅ | E3, H10 |
+| DB-5 | RLS policies + `FORCE` on 14 scoped tables | ✅ | E3, H10 |
 | DB-6 | `assert_rls_isolation()` — 3 checks, all 0 | ✅ | E3 |
 | DB-7 | Append-only: no UPDATE/DELETE grant on audit + ledger | ✅ | A4 |
-| DB-8 | Deterministic seed — 65 orders, all 15 rules, asserts on boot | ✅ | C7 |
+| DB-8 | Deterministic seed — 65 orders, all 15 rules, warns on boot | 🟡 | C7 |
 
 ---
 
@@ -67,8 +69,14 @@ can be referenced directly ("do CORE-4").
 | API-12 | `GET /audit/{answer_id}` — replay a past answer | ⬜ | A2 |
 | API-13 | `GET /conversations` · `/list` · `POST /conversations/new` | ✅ | §7 |
 
-**API-10:** replay path works; first-execute path is a stub — no proposal store,
-so approve returns `no_matching_proposal`. Needs AGT-6.
+**API-10:** the full loop is in, not a stub. Propose (`record_proposal`) writes
+`pending_approval` to `action_audit`; approve re-checks authorisation against
+the *approver's* session, not the proposer's (D3); execute performs the effect
+and writes `executed` in the same transaction; a second approval of an
+already-executed key writes `replayed_noop` and changes nothing (D2). Only
+`refund` has a real effect — everything else is recorded as
+`recorded_only`, honestly, rather than claiming an integration that isn't
+there. See AGT-6.
 
 ---
 
@@ -83,12 +91,18 @@ so approve returns `no_matching_proposal`. Needs AGT-6.
 | CORE-9 | `app/clock.py` — one clock, pinned to the seed | ✅ | C7 |
 | CORE-10 | Glossary — 48 curated terms, coverage asserted vs enums | ✅ | B1 |
 | CORE-5 | Authorization gate — re-checked at execute vs approver | ✅ | D3 |
-| CORE-6 | Policy engine — eligibility vs config, shows its work | ⬜ | I6 |
+| CORE-6 | Policy engine — verdict + factors, each with its source | ✅ | I6 |
 | CORE-7 | Cohort/aggregate filter — derived, not model-authored | ✅ | J6 |
 | CORE-8 | Proposal store + deterministic idempotency key | ✅ | D2 |
 
-**CORE-5:** gate logic exists inline in `ask.py`; not extracted, not re-checked
-at execute. **CORE-8:** key derivation is done; proposals aren't persisted.
+**CORE-5:** `check_permitted()` (`agent/actions.py`) is called from
+`execute()`, itself called from `POST /actions/{id}/approve` against the
+*approver's* session — the case that matters, an L1 proposing and a
+supervisor approving, is exactly what is re-checked (D3). **CORE-8:** key
+derivation is `uuid5(action, order_id, rule_id)`, deterministic on purpose so
+two independent proposals for the same thing collide; proposals are persisted
+to `action_audit` at propose time (`record_proposal`, `ON CONFLICT DO
+NOTHING` on the key) and read back at approve (`find_proposal`).
 
 ---
 
@@ -104,7 +118,7 @@ at execute. **CORE-8:** key derivation is done; proposals aren't persisted.
 | AGT-6 | Action proposal → approve → execute → audit | ✅ | D1, D2, D3, D6 |
 | AGT-7 | Conversation store — 4 components, persisted, RLS-scoped | ✅ | §7, C1 |
 
-Files: `api/app/agent/{planner,resolve,synthesise,tier2}.py`.
+Files: `api/app/agent/{planner,resolve,synthesise,tier2,actions,cohorts,conversation}.py`.
 
 **AGT-1** calls the model and falls back to keywords on any failure — same
 function signature, so the fallback is a path rather than an error branch.
@@ -166,7 +180,10 @@ default: a fresh clone with no key boots, serves the console, runs the evals.
 
 ## 6 · EVAL — Eval harness
 
-Fixture: `questions_v2.json` — **52 cases, all gating.** Three added to close EVAL-7 coverage gaps (`delivery_attempts_exhausted`, `ticket_orphaned`) and the new `concept` shape.
+Fixture: `questions_v2.json` — **55 cases, all gating** (was 49, then 52). Three cases
+added: D-07 and T-06 close the EVAL-7 coverage gaps for
+`delivery_attempts_exhausted` and `ticket_orphaned`; K-01 exercises the new
+`concept` shape.
 
 | ID | Item | Status | Inv. |
 |---|---|---|---|
@@ -182,23 +199,36 @@ Run: `cd api && .venv/bin/python -m evals.run --shape lookup [--live]`.
 Default is the fake adapter (ADR-014); `--live` sets `MODEL_ADAPTER=sarvam`
 explicitly, so a "live" run can never silently be a fake one.
 
-**EVAL-7 currently fails on the fixture**, and correctly: `ticket_orphaned` and
-`delivery_attempts_exhausted` are two of the 15 rules and no case exercises
-either. Either the fixture gains cases or those rules are not actually
-verified — recorded rather than suppressed.
+**EVAL-7 now passes**: D-07 and T-06 closed the last two gaps
+(`delivery_attempts_exhausted`, `ticket_orphaned`); all 15 rules have at least
+one asserting case.
+
+**Current run: 55/55**, with all 15 rules covered. By shape: action 8/8,
+aggregate 3/3, cohort 4/4, concept 1/1, diagnosis 14/14, lookup 14/14,
+unshaped/multi-turn 3/3, policy 3/3, query_console 2/2.
+
+Green here means green against the **fake adapter** — deterministic, offline,
+free. That is the meaningful claim: every assertion holds against deterministic
+execution, so a live failure is a provider problem rather than a logic one.
+`--live` is a separate run and a slower one.
+
+The two `query_console` cases carry `raw_sql` rather than `query` and never
+touch the NL surface. They run the console path directly — role gate,
+SELECT-only check, row cap — because that is what they assert about.
 
 ### Fixture composition
 
 | By shape | n | | By tier | n |
 |---|---|---|---|---|
-| lookup | 14 | | core | 24 |
-| diagnosis | 12 | | hard | 16 |
+| lookup | 14 | | core | 27 |
+| diagnosis | 14 | | hard | 16 |
 | action | 8 | | medium | 7 |
 | cohort | 4 | | trivial | 2 |
 | aggregate | 3 | | | |
 | policy | 3 | | refusals | 3 |
 | query_console | 2 | | multi-turn | 4 |
 | unshaped | 3 | | | |
+| concept | 1 | | | |
 
 ---
 
@@ -224,11 +254,35 @@ verified — recorded rather than suppressed.
 
 | ID | Item | Status | Inv. |
 |---|---|---|---|
-| OBS-1 | Trace store — per-stage timing, model, tokens | ⬜ | A3, G1 |
+| OBS-1 | Trace store — per-stage timing, model, tokens | ✅ | A3, G1 |
 | OBS-2 | Budgets — tool calls, depth, wall-clock, tokens | 🟡 | D5 |
 | OBS-3 | Per-conversation budget — 20-turn cap enforced, tokens pending | 🟡 | D5, §7 |
 | OBS-4 | Metrics — rule fire rates, refusal rate, tool errors | ⬜ | I5 |
 | OBS-5 | Tier 2 auto-reply gate — structured state only | ✅ | J8, D7 |
+| OBS-6 | Langfuse exporter — optional, inert without `LANGFUSE_*` keys | ✅ | H11 |
+
+**OBS-1:** `app/obs/trace.py`. Always on — one `Span` per pipeline stage
+(route, resolve, plan, rules, tier2, synthesise), each carrying real timings
+and a structured `detail` payload saying what that stage decided, plus the
+gateway's captured prompt/response exchanges harvested onto the trace before
+it leaves (`_harvest` in `ask.py`). Post-redaction only: what's traced is what
+was actually sent, never the raw prompt. Replaces an earlier version that
+hardcoded `{"rules": 1ms, "synthesise": 1ms}` regardless of what happened.
+
+**OBS-2:** wall-clock (`MODEL_TIMEOUT_S`, default 60s) and a token budget
+(`MODEL_MAX_TOKENS`) exist per model call via `gateway.py`; there is no
+tool-call or reasoning-depth budget, because the pipeline is a fixed sequence
+of stages rather than an agentic tool loop that could run away in that
+dimension.
+
+**OBS-6:** `app/obs/langfuse_export.py`. Maps `conversation_id` → Langfuse
+session, `actor_id` → Langfuse user, and every eval case result → a Langfuse
+score, so "which cases pass on the fake adapter but fail live" is a view
+rather than a diff of two terminal scrollbacks. Self-hosted only by
+convention, not by code — nothing stops pointing `LANGFUSE_HOST` at their
+cloud, so this is written down rather than enforced. Exported after the
+answer is built, every failure inside swallowed, so a slow or unreachable
+collector shows up as latency rather than a lost trace or a broken request.
 
 ---
 
@@ -236,9 +290,10 @@ verified — recorded rather than suppressed.
 
 Dependencies, not priorities. Each step is independently verifiable.
 
-Steps 1–6 are done. The remaining order is by shape, one vertical slice at a
-time — implement, run that shape's eval cases, fix, then move on. `lookup`
-(14 cases) is complete; `diagnosis` is next.
+Steps 1–7e are done. The remaining order is by shape, one vertical slice at a
+time — implement, run that shape's eval cases, fix, then move on. `lookup`,
+`diagnosis`, `action`, `cohort`, `aggregate` and `concept` are complete;
+`policy` and `query_console` are the open slice (7f).
 
 | # | Step | Status |
 |---|---|---|
@@ -248,17 +303,19 @@ time — implement, run that shape's eval cases, fix, then move on. `lookup`
 | 4 | MDL-8 redaction — **had to precede AGT-5** | ✅ |
 | 5 | AGT-5 synthesiser | ✅ |
 | 6 | AGT-1 router as a model call, keywords kept as F4 fallback | ✅ |
-| 7a | Shape slice: **diagnosis** (12 cases) | ✅ |
+| 7a | Shape slice: **diagnosis** (12 cases at the time; 14 now, D-07/T-06 added later) | ✅ |
 | 7b | Multi-turn (M-01…M-04) + conversation persistence | ✅ |
 | 7c | Glossary + `concept` shape (7th) | ✅ |
 | 7d | Shape slice: **action** (8 cases) + write path | ✅ |
 | 7e | Shape slices: **cohort** (4) + **aggregate** (3) | ✅ |
-| 7f | **Remaining: policy (3) → query_console (2)** | next |
+| 7f | Shape slices: **policy** (3) + **query_console** (2) | ✅ |
+| 7g | All seven shapes complete | ✅ |
+| 7h | Audit gaps 4–7 — cases first, then fixes — **55/55** | ✅ |
 | 8 | AGT-6 + CORE-8 + API-10/12 (write path, replay) | with `action` |
 | 9 | CORE-7 filter AST → SQL | with `cohort`/`aggregate` |
 | 10 | CORE-6 policy engine | with `policy` |
-| 11 | AGT-7 conversation-store writes, UI-11 | — |
-| 12 | OBS-1…4 | — |
+| 11 | AGT-7 conversation-store writes, UI-11 | ✅ |
+| 12 | OBS-1…4, OBS-6 (Langfuse) | OBS-1, OBS-6 ✅ · OBS-2, OBS-3 🟡 · OBS-4 ⬜ |
 
 **Step 1 before step 2 before step 3 is load-bearing.** Fake adapter first →
 the suite is fast, free and deterministic. Fake adapter last → C1 and C5 quietly
@@ -331,9 +388,10 @@ the building, and H11 retention is the provider's policy, not ours. MDL-8 is
 load-bearing and stays where it is in the build order — before the synthesiser,
 which is the first stage that would otherwise want to see customer text.
 
-`gateway.py` therefore **fails closed today**: a networked adapter refuses any
-call not explicitly marked as having passed redaction. Nothing calls the gateway
-on the request path yet, so this costs nothing now and cannot be forgotten later.
+`gateway.py` therefore **fails closed**: a networked adapter refuses any call
+not explicitly marked as having passed redaction. `/ask` passes the gateway on
+every live model call — router, planner and synthesiser all go through MDL-8
+before anything reaches Sarvam.
 
 ### One thing that gets harder
 
@@ -363,10 +421,7 @@ scripts, which is survivable (J11) but the flag rate becomes less meaningful.
 Per-case latency live is **26–133 s** — three model calls, each ~8 s of API time
 plus reasoning. That is the strongest argument yet for a small router model
 (`DESIGN.md` ADR-023): a 105B reasoning model is being paid to choose between
-six labels.
-
-Also correcting the note above: the redaction gate is no longer inert. `/ask`
-now passes the gateway, so every live model call goes through MDL-8.
+seven labels.
 
 ---
 
@@ -378,3 +433,34 @@ now passes the gateway, so every live model call goes through MDL-8.
 | Window sizes in §7 asserted, not derived | AGT-7 | `WINDOW = 3` is still a guess. Deriving it needs more multi-turn cases than the fixture's four |
 | ~~`state_hash` undefined~~ | AGT-7 | **Closed.** Covers rule-relevant fields only; verified to move on a real state change and hold otherwise |
 | F5, F6, H11, I3 | stated, deferred | Backpressure, concurrency, retention, reversible migrations — `SCOPE.md` §2 |
+
+### Found by audit, not by the suite
+
+Every one of these passed while the suite was green. A green suite is a
+statement about the cases in it, and these were the things no case asserted on.
+
+| # | Gap | Where | Why it matters |
+|---|---|---|---|
+| 1 | **`/ask` can mutate.** `_approve_named` calls `actions.execute()` directly, so *"approve and execute PR-4410"* typed into the chat commits a refund | `ask.py` | `DESIGN.md` §2a claimed no code path runs from `/ask` to a mutation. It was false. The real invariant — no write without an existing proposal and a fresh authorisation check — still holds, and §2a now says that instead |
+| 2 | **`rc_transfer_stall` fires at 48h, not 72h.** The predicate is `> rc_stall_hours - 24` with the constant at 72 | `rules.py:153` | A rule whose threshold disagrees with its own config constant. One of the two was changed without the other, and the `- 24` is unexplained |
+| 3 | **Boot checks warn, they do not halt.** `RAISE WARNING` ×4, `RAISE EXCEPTION` ×0 | `03_seed.sql` | A seed with wrong counts still boots and the warning scrolls past. Documented as "asserted", which was stronger than the truth |
+| 4 | ~~Bulk proposals are never persisted~~ | `ask.py` | **Fixed.** `_bulk_proposal` now calls `record_proposal`, so the lifecycle can continue. Guarded by `W-07` |
+| 5 | ~~`find_proposal` ignores `proposal_id`~~ | `actions.py` | **Fixed.** Parameter removed. The key is the identity that matters; a parameter the body ignores is a claim the function does not honour |
+| 6 | ~~Token counters are process-cumulative~~ | `gateway.py` | **Fixed.** `begin()` resets them. A cost figure that rises whether or not you spend anything is not a cost figure. Guarded by `G-01` |
+| 7 | **The planner does not shape the fetch — and cannot** | `ask.py`, `planner.py` | **Documentation corrected, code unchanged.** `snapshot_for_order` fetches a fixed shape; nothing reads the planner's output to decide which SQL runs. Reordering would move a no-op earlier: the snapshot is seven indexed queries in single-digit ms, so planning to skip three of them would cost an ~8s model call. What remains open is whether the planner earns its call at all |
+| 8 | **`app_actor` has no RLS**, by design — an actor must be resolvable before scope is known | `02_rls.sql` | Correct, but several docs said "all 15 tables". The figure is 14 |
+
+Items 1–3 were documentation corrected to match the code. Items 4–6 were code
+that did not match its description and are now fixed, each guarded by a case
+that failed before the fix. Item 7 turned out to be the reverse — the code was
+right and the description wrong. Item 8 was only ever a counting error.
+
+**The three new cases were written to fail first.** `W-07`, `G-01` and `G-02`
+each failed for the exact reason stated, then passed. A fix with no failing
+test behind it is a claim.
+
+`G-02` is worth noting: it originally asserted `plan` ran before `resolve`, and
+that assertion was wrong. Reading the fetch showed there was nothing to reorder
+*for*. The case now asserts the property actually worth protecting — that the
+planner's decision is auditable, having either run or been skipped with a
+recorded reason.

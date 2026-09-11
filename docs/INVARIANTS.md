@@ -203,7 +203,7 @@ Not just `ticket.body`. Any field whose value originates outside the trust bound
 | I3 | Schema changes ship as reversible migrations | Up/down migration test |
 | I4 | An agent can flag an answer as wrong, and that flag becomes an eval case | Feedback endpoint writes a candidate fixture |
 | I5 | Rule fire rates, refusal rate, and tool error rates are observable in aggregate | Metrics endpoint |
-| I6 | Configuration — thresholds, limits, SLAs, allowlists — is data, not code or prompt text | Config file; changing a threshold requires no redeploy of logic |
+| I6 | Configuration — thresholds, limits, SLAs, allowlists — is data, not code or prompt text | `core/rules.Config`. A policy answer reports the threshold it applied alongside its verdict, so changing one changes the answer and its explanation together (`P-01`) |
 
 ---
 

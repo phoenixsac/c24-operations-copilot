@@ -42,7 +42,7 @@ from app.agent.conversation import state_hash
 from app.agent.resolve import Ambiguous, NotFound, resolve
 from app.agent.synthesise import draft_reply, synthesise
 from app.agent.tier2 import AUTO_REPLY_ROLE, evaluate_gate
-from app.core import glossary
+from app.core import glossary, policy
 from app.core.ir import IR, EntityRef, QueryShape
 from app.core.rules import RuleViolation, evaluate, expected_state
 from app.data.queries import snapshot, snapshot_for_order
@@ -120,7 +120,12 @@ _SHAPE_CUES: list[tuple[QueryShape, list[str]]] = [
                          "anything i should", "what should i", "overdue",
                          "in my queue", "needs attention", "stuck more than",
                          "stuck for more", "look at today"]),
-    (QueryShape.POLICY, ["eligible", "policy", "allowed", "entitled", "window", "can we"]),
+    # A permission question. "Are they eligible", "can we make an exception",
+    # "can I get a refund" — all ask what is *permitted*, which is answered from
+    # configured thresholds rather than from what has gone wrong (CORE-6).
+    (QueryShape.POLICY, ["eligible", "eligibility", "policy", "allowed", "entitled",
+                         "window", "can we", "can i", "are they", "am i", "permitted",
+                         "exception", "within the"]),
     (QueryShape.LOOKUP, ["status", "summar", "when", "what is", "show", "details",
                          "who", "where", "evidence", "tell me about"]),
 ]
@@ -144,6 +149,15 @@ _DOMAIN_ANCHORS = [
 # instruction to change it.
 _INTERROGATIVE = re.compile(
     r"^\s*(who|what|which|where|when|how|whose|whom)\b", re.I
+)
+
+# "Can I…?", "am I allowed…?" — asking whether something is permitted, which is
+# a policy question however much it looks like a request. "Can I get a refund?"
+# contains the word `refund` and commands nothing; routing it to `action` would
+# offer to execute a write in answer to a question about eligibility. Eval AU-03.
+_ASKS_PERMISSION = re.compile(
+    r"^\s*(can|could|may|am\s+i|are\s+we|are\s+they|is\s+(?:it|this|that)|do\s+(?:i|we))\b",
+    re.I,
 )
 
 # An imperative that changes something. Matched as whole words so "refunded"
@@ -310,7 +324,9 @@ def route(query: str, *, in_conversation: bool = False) -> tuple[QueryShape, flo
     #
     # "Can we refund this?" is deliberately not covered here: it is a policy
     # question, and `policy` is checked before `lookup` below.
-    asks_rather_than_tells = _INTERROGATIVE.match(q) is not None
+    asks_rather_than_tells = (
+        _INTERROGATIVE.match(q) is not None or _ASKS_PERMISSION.match(q) is not None
+    )
 
     for shape, cues in _SHAPE_CUES:
         if shape is QueryShape.ACTION and asks_rather_than_tells:
@@ -510,6 +526,97 @@ def _refusal(answer_id: str, shape: QueryShape, reason: str, started: datetime,
     }
 
 
+def _policy_answer(sql: Sql, session: Session, answer_id: str, query: str,
+                   snap: dict, started: datetime, gw: "Gateway | None",
+                   trace: "Trace | None" = None) -> dict:
+    """
+    An eligibility decision that shows every input it used.
+
+    The factors are the answer, not decoration. A verdict of "ineligible" with
+    no clock start is a claim; the same verdict naming the DELIVERED event, the
+    configured window and today's position is something an operator can check
+    without asking anyone. I6.
+
+    No model call. The decision is arithmetic over records and config, and a
+    model rephrasing it could only introduce a number that was not computed.
+    """
+    d = policy.decide(query, snap, session)
+    order = snap.get("order") or {}
+
+    # The Tier 2 gate runs here too.
+    #
+    # It lives at stage ⑤ on the main path, and `policy` returns before that —
+    # so without this a policy question from the copilot identity was never
+    # gated at all. `policy` is not in AUTO_REPLY_SHAPES, so the gate refuses;
+    # the point is that it refuses *explicitly* and says why, rather than the
+    # question slipping past the gate because of where the code returns. J8.
+    tier2 = None
+    if session.role.value == AUTO_REPLY_ROLE:
+        tier2 = evaluate_gate(
+            shape=QueryShape.POLICY.value, role=session.role.value,
+            snap=snap, violations=[],
+        )
+
+    gate = None
+    if d.requires_role and session.role.value != d.requires_role:
+        gate = {
+            "reason": f"This decision is reserved to a {d.requires_role}.",
+            "limit_inr": session.refund_limit_inr,
+            "routes_to": {"name": "Supervisor", "role": d.requires_role},
+        }
+
+    shown = "; ".join(f"{f.label}: {f.value} [{f.source}]" for f in d.factors)
+    missing = (
+        " Not checked, because it is not recorded: " + "; ".join(d.unrecorded) + "."
+        if d.unrecorded else ""
+    )
+
+    return {
+        "answer_id": answer_id,
+        "ir": {
+            "shape": QueryShape.POLICY.value,
+            "entities": ([{"type": "order", "id": order["id"]}] if order else []),
+            "filters": [], "time_window": None, "requested_action": None,
+            "ambiguities": [], "confidence": 1.0,
+        },
+        "verdict": f"{d.verdict.replace('_', ' ').capitalize()}. {d.summary}",
+        "explanation": f"Decided on: {shown}.{missing}",
+        # Every factor cites where it came from, so the provenance line is the
+        # decision rather than a restatement of it.
+        "provenance": "; ".join(f"{f.label}={f.value} ({f.source})" for f in d.factors),
+        "policy": {
+            "verdict": d.verdict,
+            "policy_id": d.policy_id,
+            "factors": [{"label": f.label, "value": f.value, "source": f.source}
+                        for f in d.factors],
+            "unrecorded": d.unrecorded,
+            "requires_role": d.requires_role,
+        },
+        "violation": None,
+        # The governing policy is named even though it did not *fire* — the
+        # question was about permission, not about a violation. Eval P-01 asserts
+        # on this: an eligibility answer must say which policy it applied.
+        "fired_rules": [{"rule_id": d.policy_id, "version": 1,
+                         "triggering_fields": {"verdict": d.verdict}}]
+                       if d.policy_id != "\u2014" else [],
+        "evidence": _build_evidence(snap, []),
+        "digest": {"rule_ids": [d.policy_id], "cited": [], "state_hash": "",
+                   "injection_flagged": False},
+        "draft": None, "draft_style": None,
+        "tier2": ({"auto_reply": tier2.auto_reply, "reasons": tier2.reasons,
+                   "routed_to": tier2.routed_to,
+                   "force_assigned_human": tier2.force_assigned_human,
+                   "queued_for_review": tier2.queued_for_review} if tier2 else None),
+        "confidence": 1.0,
+        "proposal": None,
+        "approval_gate": gate,
+        "refusal": None, "degraded": None, "injection_flagged": False,
+        "_trace_obj": _harvest(trace, gw),
+        "trace": _trace(started, 1, model="deterministic", synth="policy", gw=gw,
+                        trace=trace),
+    }
+
+
 async def _cohort_answer(sql: Sql, session: Session, answer_id: str, query: str,
                          shape: QueryShape, started: datetime,
                          gw: "Gateway | None",
@@ -703,6 +810,20 @@ async def _bulk_proposal(sql: Sql, session: Session, answer_id: str,
             "routes_to": {"name": "Supervisor", "role": "supervisor"},
         },
     }
+
+    # Persisted like any other proposal. It was not, and that made the bulk path
+    # a dead end: the answer offered an approval that `find_proposal` could
+    # never locate, so propose → approve → execute stopped at the first arrow.
+    # W-03 passed throughout, because it only asserted that nothing executed.
+    await record_proposal(
+        sql, session,
+        answer_id=answer_id, proposal=proposal,
+        rule_id=wanted, rule_version=1,
+        # No single order — the subject is the cohort, and the idempotency key
+        # is derived from (bulk_refund, 0, rule) so re-asking cannot queue a
+        # second one.
+        order_id=None, ticket_id=None,
+    )
 
     return {
         "answer_id": answer_id,
@@ -1279,8 +1400,22 @@ async def ask(
             trace=trace, gw=gw,
         )
 
-    # The planner may widen the fetch set, but only after the shape is fixed and
-    # only from wrapped, untrusted context that cannot reclassify the request.
+    # The planner runs AFTER the fetch, and the comment here used to claim it
+    # "widens the fetch set". It does not, and cannot: `snapshot_for_order`
+    # fetches a fixed shape — payments, refunds, rc_case, refurb, delivery,
+    # events, live orders — unconditionally. Nothing reads the planner's output
+    # to decide what SQL runs.
+    #
+    # That is the right design for this workload rather than an oversight: the
+    # snapshot is seven small indexed queries on one order, single-digit
+    # milliseconds. Planning to skip three of them would cost an ~8-second model
+    # call, so the "efficient" ordering is strictly worse. Reordering would only
+    # move a no-op earlier.
+    #
+    # What the planner actually contributes: sub-entity hints that appear in the
+    # reported IR and in conversation memory, and `ambiguities` when a question
+    # could mean two things. Whether that earns a model call is an open question
+    # — see DESIGN.md §11.
     #
     # Skipped when it has nothing to add, which is most of the time. The planner
     # answers one question — *which record types are needed* — and that is
@@ -1312,6 +1447,16 @@ async def ask(
     # whether the text arrived this turn or was persisted three turns ago.
     if res.context and not injection_flagged:
         _, injection_flagged = wrap_untrusted(res.context)
+
+    # ---- policy: what is permitted, not what is wrong ----------------------
+    #
+    # Answered before the rules engine because the two ask different questions.
+    # "Are they eligible to return it?" is hypothetical — no rule has fired and
+    # none will, because the return has not been requested. Waiting for a
+    # violation would answer it with silence.
+    if shape is QueryShape.POLICY and policy.applies(query):
+        return _policy_answer(sql, session, answer_id, query, snap, started, gw,
+                              trace=trace)
 
     # ---- stage 4: diagnose (no model, ever) --------------------------------
     # A source that did not answer is named, never treated as empty. Saying

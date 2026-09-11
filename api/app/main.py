@@ -473,7 +473,7 @@ async def approve(proposal_id: str, session: Session = Depends(resolve_session),
         raise HTTPException(400, "Idempotency-Key header required")
 
     async with db.with_session(session) as sql:
-        row = await actions.find_proposal(sql, proposal_id, idempotency_key)
+        row = await actions.find_proposal(sql, idempotency_key)
         if row is None:
             # Never existed, or belongs to another city and RLS removed it.
             # Indistinguishable on purpose. ADR-001.

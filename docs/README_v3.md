@@ -204,7 +204,7 @@ Notes: connect as a dedicated `app_user`, since RLS is bypassed by table owners 
 **Simulation**
 
 15. Seed data is deterministic with a fixed RNG seed, so evals are reproducible.
-16. Volumes are illustrative (~60 orders), sized for testability rather than scale.
+16. Volumes are illustrative (65 orders, 26 tickets), sized for testability rather than scale.
 
 ---
 
@@ -252,7 +252,7 @@ Each violated invariant is a named, versioned rule in code, not prompt text. Eve
 | rule_id | Fires when | Blocking entity | Action |
 |---|---|---|---|
 | `payment_capture_lag` | Captured but state not advanced >30m | payment | replay_webhook |
-| `rc_transfer_stall` | FULL_PAID >72h, RC not done | rc_case | escalate_rto |
+| `rc_transfer_stall` | FULL_PAID >48h, RC not done | rc_case | escalate_rto |
 | `refurb_overrun` | Refurb past promised_at | refurb_job | notify_customer_delay |
 | `delivery_slot_missing` | RC_DONE >24h, no delivery row | — | schedule_delivery |
 | `delivery_attempts_exhausted` | attempt_count ≥ 3 | delivery | call_customer |
@@ -271,7 +271,7 @@ Because causes are structured IDs rather than sentences, they aggregate. That's 
 
 ### Seed data
 
-About 60 orders plus tickets.
+65 orders and 26 tickets.
 
 | Bucket | Count | Purpose |
 |---|---|---|
@@ -334,7 +334,9 @@ Everything routes into exactly one of these. Each has its own execution path and
 
 Routing first, rather than one prompt handling all of them, is the central architectural decision.
 
-There were seven shapes. `synthesis` — "give me a full status summary" — was folded into `lookup`, because the only thing separating them was how many tools ran in parallel. Breadth is a parameter of the plan, not a different kind of question, and a taxonomy that splits on breadth invites arguing about where the line sits. `aggregate` and `cohort` stay separate because reduce-to-a-number and retain-row-identity are genuinely different execution paths, and `policy` stays because its answer depends on configured thresholds the records do not contain. Aggregates in particular: routed through retrieval they produce confident wrong counts, which is worse than no answer.
+There were seven shapes. `synthesis` — "give me a full status summary" — was folded into `lookup`, because the only thing separating them was how many tools ran in parallel. Breadth is a parameter of the plan, not a different kind of question, and a taxonomy that splits on breadth invites arguing about where the line sits. `aggregate` and `cohort` stay separate because reduce-to-a-number and retain-row-identity are genuinely different execution paths, and `policy` stays because its answer depends on configured thresholds the records do not contain — and because a policy question is usually hypothetical, describing something that has not happened, so no rule has fired and none will (DESIGN.md ADR-040). Aggregates in particular: routed through retrieval they produce confident wrong counts, which is worse than no answer.
+
+**Seven again, for a different reason.** A `concept` shape was added later (DESIGN.md ADR-036) for questions about what a term *means* rather than what the records say — "what is the difference between token paid and full paid?". The six record shapes could not express it, so the system refused when asked plainly and improvised a definition when the phrasing dragged it into `diagnosis`. The second is the worse failure. `concept` answers from a curated glossary with no model call and no records read.
 
 ---
 

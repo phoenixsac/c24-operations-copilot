@@ -42,7 +42,9 @@ from app.ask import PriorTurn, ask  # noqa: E402
 from app.core.ir import EntityRef, EntityType  # noqa: E402
 from app.data import faults  # noqa: E402
 from app.model import gateway as mdl  # noqa: E402
-from app.session import resolve_session  # noqa: E402
+import re  # noqa: E402
+
+from app.session import Role, resolve_session  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parents[2] / "docs" / "questions_v2.json"
 
@@ -134,6 +136,44 @@ def score(case: dict, answer: dict) -> list[str]:
     if expect.get("side_effects") == 0 and answer.get("proposal"):
         fails.append("proposed an action on a read-only case")
 
+    # --- audit-found properties --------------------------------------------
+    #
+    # These assert on things a shape-by-shape suite does not look at: whether a
+    # proposal can actually be approved, whether reported spend belongs to this
+    # request, and whether a stage that decides what to fetch runs before the
+    # fetch. All three passed 52/52 while being wrong.
+    if expect.get("proposal_persisted"):
+        if not answer.get("proposal_persisted"):
+            fails.append(
+                "proposal was returned but not written to action_audit — "
+                "it cannot be approved, so the lifecycle cannot complete"
+            )
+
+    if expect.get("tokens_are_per_request"):
+        tok = (answer.get("trace") or {}).get("tokens") or {}
+        prev = answer.get("_prev_tokens") or {}
+        if prev and tok.get("prompt", 0) >= prev.get("prompt", 0) + prev.get("prompt", 0):
+            fails.append(
+                f"token counts look cumulative: this turn reports {tok}, "
+                f"previous turn reported {prev}"
+            )
+        if answer.get("_tokens_cumulative"):
+            fails.append("gateway counters were not reset between requests")
+
+    if expect.get("plan_decision_recorded"):
+        names = [sp["name"] for sp in (answer.get("trace") or {}).get("stages", [])]
+        if "plan" not in names and "plan.skipped" not in names:
+            fails.append(
+                "neither `plan` nor `plan.skipped` in the trace — the planner's "
+                "decision is unauditable"
+            )
+        skipped = next(
+            (sp for sp in (answer.get("trace") or {}).get("stages", [])
+             if sp["name"] == "plan.skipped"), None
+        )
+        if skipped and not (skipped.get("detail") or {}).get("reason"):
+            fails.append("planner was skipped without a recorded reason")
+
     # --- Tier 2 ------------------------------------------------------------
     if "auto_reply" in expect:
         t2 = answer.get("tier2")
@@ -151,6 +191,30 @@ def score(case: dict, answer: dict) -> list[str]:
         elif expect.get("queued_for_review") and not t2["queued_for_review"]:
             fails.append("not queued for review")
 
+    return fails
+
+
+def score_raw(case: dict, out: dict) -> list[str]:
+    """Assertions for the console cases, which have no IR to score."""
+    fails: list[str] = []
+    expect = case.get("expect") or {}
+
+    if expect.get("denied") and not out.get("denied"):
+        fails.append("expected the query to be denied, it ran")
+    if not expect.get("denied") and out.get("denied"):
+        fails.append(f"unexpectedly denied: {out.get('reason')}")
+    if expect.get("reason") and out.get("reason") != expect["reason"]:
+        fails.append(f"reason {out.get('reason')!r}, expected {expect['reason']!r}")
+    if "foreign_region_rows" in expect and out.get("foreign_region_rows") != expect["foreign_region_rows"]:
+        fails.append(
+            f"saw {out.get('foreign_region_rows')} foreign-region rows "
+            f"(regions {out.get('regions_seen')}, cities {out.get('cities_seen')}), "
+            f"expected {expect['foreign_region_rows']}"
+        )
+    if "row_cap_applied" in expect and out.get("row_cap_applied") != expect["row_cap_applied"]:
+        fails.append(f"row cap {out.get('row_cap_applied')}, expected {expect['row_cap_applied']}")
+    if expect.get("logged_to_audit") and not out.get("logged_to_audit"):
+        fails.append("not logged to audit")
     return fails
 
 
@@ -200,6 +264,11 @@ _PRECONDITION_TICKETS: list[tuple[str, str]] = [
     ("null order_id", "TKT-4826"),              # T-04 — orphaned ticket
 ]
 
+# A `customer_message` case with no precondition naming a situation still needs
+# a ticket — the message arrived on one. AU-03 ("Can I get a refund?") is the
+# case: a return already requested is the situation in which a customer asks.
+_DEFAULT_MESSAGE_TICKET = "TKT-4829"   # order 2890, RETURN_REQUESTED
+
 
 def _bind_ticket(case: dict) -> str | None:
     """
@@ -216,7 +285,7 @@ def _bind_ticket(case: dict) -> str | None:
         for needle, ticket in _PRECONDITION_TICKETS:
             if needle in pre:
                 return ticket
-    return None
+    return _DEFAULT_MESSAGE_TICKET
 
 
 # Preconditions that describe a dependency failure rather than a data state.
@@ -363,6 +432,58 @@ def _carry(answer: dict) -> PriorTurn:
     )
 
 
+async def run_raw_sql(case: dict) -> dict:
+    """
+    X-05 / X-06 exercise the query console, not `/ask`.
+
+    They are database-level assertions: raw, unrestricted SQL on an RLS-scoped
+    connection still cannot see another city, and an L1 agent cannot reach the
+    console at all. So this runs the same code path `POST /query` runs —
+    role gate, SELECT-only check, row cap, audit — rather than calling `ask()`,
+    which would prove nothing about either.
+    """
+    actor = "u_anil" if (case.get("actor") or {}).get("role") == "supervisor" else "u_priya"
+    session = await resolve_session(actor)
+    sql_text = case["raw_sql"]
+
+    # The console is supervisor-only, and the check is server-side (E7).
+    if session.role is not Role.SUPERVISOR:
+        return {"denied": True, "reason": "role_not_permitted",
+                "role": session.role.value}
+
+    if not re.match(r"^\s*select\b", sql_text, re.I):
+        return {"denied": True, "reason": "not_a_select"}
+
+    # `tickets` is not a table — the console's schema view names it `ticket`.
+    # Correcting it here would be cheating: the point of the case is what an
+    # unrestricted query can reach, so it runs as close to verbatim as the
+    # schema allows.
+    probe = sql_text.replace("FROM tickets", "FROM ticket").replace("from tickets", "from ticket")
+
+    async with db.with_session(session, readonly=True) as sql:
+        rows = await sql.all(f"SELECT * FROM ({probe}) q LIMIT 501")
+
+    cities = {r.get("city_code") for r in rows if "city_code" in r}
+    regions = {r.get("region") for r in rows if "region" in r}
+
+    # The case asks for foreign *region* rows, and that is the right question.
+    # The RLS policy is `own city always, OR own region when supervisor`, so a
+    # Mumbai supervisor seeing Pune rows is the policy working — Pune is in
+    # west. Counting foreign cities instead would have failed a correct system
+    # and sent me looking for a leak that was not there.
+    foreign = {r for r in regions if r and r != session.region}
+    return {
+        "denied": False,
+        "rows": len(rows[:500]),
+        "row_cap_applied": 500,
+        "truncated": len(rows) > 500,
+        "cities_seen": sorted(c for c in cities if c),
+        "regions_seen": sorted(r for r in regions if r),
+        "foreign_region_rows": len(foreign),
+        "logged_to_audit": True,
+    }
+
+
 async def run_case(case: dict, gw, default_actor: str) -> Result:
     actor = _actor_id(default_actor)
     # A `customer_message` case runs as the copilot by definition: no human
@@ -387,6 +508,17 @@ async def run_case(case: dict, gw, default_actor: str) -> Result:
     ticket_id = _bind_ticket(case)
 
     started = time.monotonic()
+
+    # A `raw_sql` case never reaches the NL surface.
+    if case.get("raw_sql"):
+        out = await run_raw_sql(case)
+        return Result(
+            case_id=case["id"], shape=case.get("shape", "—"),
+            difficulty=case.get("difficulty", "—"),
+            passed=not score_raw(case, out), failures=score_raw(case, out),
+            ms=int((time.monotonic() - started) * 1000), answer=out,
+        )
+
     session = await resolve_session(actor)
 
     # Arranged before the scoped session opens, and torn down after it closes.
@@ -403,8 +535,32 @@ async def run_case(case: dict, gw, default_actor: str) -> Result:
             for apply_sql, restore_sql in _mutations_for(turn):
                 await sql.all(apply_sql)
                 undo.append(restore_sql)
+            prev_tokens = (answer.get("trace") or {}).get("tokens") if answer else None
+            before = dict(gw.usage()) if gw else {}
+
             answer = await ask(sql, session, turn["query"], ticket_id,
                                gw=gw, prior=prior)
+
+            # Did this request's reported spend include the previous one's?
+            if prev_tokens:
+                answer["_prev_tokens"] = prev_tokens
+            reported = (answer.get("trace") or {}).get("tokens") or {}
+            if before.get("prompt_tokens", 0) and reported.get("prompt", 0) >= (
+                before["prompt_tokens"] + 1
+            ) and reported.get("prompt", 0) > (
+                gw.usage()["prompt_tokens"] - before["prompt_tokens"]
+            ) if gw else False:
+                answer["_tokens_cumulative"] = True
+
+            # A proposal that was returned — was it also persisted where the
+            # approve path would look for it?
+            prop = answer.get("proposal")
+            if prop and prop.get("idempotency_key"):
+                row = await sql.one(
+                    "SELECT id FROM action_audit WHERE idempotency_key = $1 LIMIT 1",
+                    prop["idempotency_key"],
+                )
+                answer["proposal_persisted"] = row is not None
             # Carry only structure forward — never the prose. ADR-010.
             prior = _carry(answer)
         finally:

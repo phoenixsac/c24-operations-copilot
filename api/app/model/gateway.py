@@ -128,9 +128,24 @@ class Gateway:
         raise last
 
     def begin(self) -> None:
-        """Clear per-request state. Token counters stay cumulative by design;
-        captured exchanges must not, or a trace grows without bound."""
+        """
+        Clear per-request state — counters included.
+
+        These were cumulative, and the docstring here used to claim that was
+        deliberate. It was not: `usage()` feeds the per-request trace, so every
+        request reported every token since the process started and the number
+        only ever grew. A cost figure that rises whether or not you spend
+        anything is not a cost figure.
+
+        Process totals, if ever wanted, belong in a metrics counter that is
+        explicitly cumulative — not in the object that answers "what did this
+        request cost".
+        """
         self.exchanges = []
+        self.calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.reasoning_tokens = 0
 
     def usage(self) -> dict:
         """Folded into the trace. A3 / G3."""

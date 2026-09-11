@@ -128,7 +128,7 @@ INSERT INTO vehicle (id, reg_no, make, model, year, km, listing_status, city_cod
 -- Orders
 --
 -- 39 healthy with generated ids, plus order 2231 which is also healthy but is
--- the Tier-2-eligible one the AU-* eval cases point at. 40 healthy in total.
+-- the Tier-2-eligible one the AU-* eval cases point at. 42 healthy in total.
 -- ---------------------------------------------------------------------------
 
 INSERT INTO orders (id, customer_id, vehicle_id, state, amount, city_code, region, created_at, updated_at)
@@ -145,13 +145,13 @@ SELECT
 FROM generate_series(1, 39) AS n
 JOIN customer c ON c.id = 'c_' || n;
 
--- The 18 broken orders, the Tier-2 healthy one, and 2 unanswerable. Literal,
+-- The 21 broken orders, the Tier-2 healthy one, and 2 unanswerable. Literal,
 -- because each exists so a labelled eval case can resolve against it.
 INSERT INTO orders (id, customer_id, vehicle_id, state, amount, city_code, region, created_at, updated_at) VALUES
   -- ---- healthy, Tier 2 eligible. Zero rules fire here, by design. AU-01. ----
   (2231, 'c_40', 'v_40', 'DISPATCH_SCHEDULED', 505000.00, 'mum', 'west', (SELECT now FROM t0) - INTERVAL '5 days',  (SELECT now FROM t0) - INTERVAL '1 day'),
 
-  -- ---- 18 broken ----
+  -- ---- 21 broken ----
   -- 1. rc_transfer_stall. D-01, the brief's own example.
   (1289, 'c_41', 'v_41', 'FULL_PAID',  620000.00, 'mum', 'west', (SELECT now FROM t0) - INTERVAL '8 days',  (SELECT now FROM t0) - INTERVAL '62 hours'),
   -- 2. payment_capture_lag. D-03.

@@ -80,14 +80,37 @@ Places where the design is right but the quantity is wrong.
 > **REJECTED.** All 49 cases are in scope and all of them gate: 24 `core`,
 > 16 `hard`, 7 `medium`, 2 `trivial`. No `stretch` tier. The existing
 > `difficulty` field stays as a label, not as a gate.
+>
+> *Since:* **55 cases.** Three were added because the coverage check found
+> rules with data but no case asserting on them, or a shape with none; three
+> more because an audit found behaviour no case looked at — a proposal that
+> could not be approved, token counts that grew forever, a planner decision
+> nobody could audit.
+>
+> A tier that does not gate is a tier that rots; a rule with no case is a rule
+> nobody has checked; and a green suite is a statement about the cases in it
+> and nothing more.
 
 **Seed: 60 → 35 orders.** ~~Enough for aggregates to be non-trivial.~~
 
 > **REJECTED.** 60 orders, as originally specified: 40 healthy, 18 broken
 > (at least one clean instance per rule, 3 firing two at once), 2 unanswerable,
 > 1 injection ticket. Built and asserted on boot.
+>
+> *Since:* **65 orders (42 healthy, 21 broken, 2 unanswerable), 26 tickets.**
+> Grew as eval cases named orders the seed did not contain — the fixture is the
+> contract, so the data moved to meet it.
+>
+> The boot checks made each gap visible, but note what they are: `RAISE
+> WARNING`, not `RAISE EXCEPTION`. A seed with the wrong counts **still boots**,
+> and the warning scrolls past in the container log. That is weaker than
+> "asserted" implies and is recorded as a gap rather than rephrased away.
 
 **Tier 2: keep, but first to go.** The gate is roughly 40 lines and it's the most distinctive idea in the design. If day 4 goes badly, cut it and describe it in `DESIGN.md` — the tier framing survives without the implementation.
+
+> *Kept.* Built and passing (`AU-01`, `AU-02`, `AU-04`, `X-02f`). It also lost
+> its confidence threshold along the way — see DESIGN.md ADR-026. A number the
+> model writes about its own output is not evidence.
 
 ---
 

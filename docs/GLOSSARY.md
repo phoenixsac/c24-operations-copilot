@@ -15,9 +15,15 @@ order is the argument: verdict before evidence, cause before action.
 | **Verdict** | One line: what is true and what is blocked. "Payment is fine. Delivery is blocked on RC transfer." | Phrased by the model from a structured result. The model never picks the cause. |
 | **Diagnosis strip** | Three boxes — Expected, Observed, Stuck. | The state diff. Expected is computed from the ledgers; observed is `orders.state`. |
 | **Rule chip** | `rc_transfer_stall v2`, red. Hover shows the field values that fired it. | The rules engine. Named and versioned so any answer can be replayed. |
-| **Confidence** | A number, `0.91`. Thresholded, not decorative — the Tier 2 gate consumes it. | Emitted with every answer. |
+| **Routing confidence** | A number, `0.91`, labelled "routing confidence" on the card. Thresholded, not decorative — below `ROUTER_CONFIDENCE_FLOOR` (0.35) the router emits `unsupported` and the turn refuses rather than guesses. | The router's own certainty in its shape classification. Emitted with every answer. |
 | **Cited evidence** | Chips naming the exact records the answer rests on: `payment #P-9912`. | Only records actually retrieved. No claim appears without one. |
 | **Propose action** | A button. Names an action from a fixed list. | The rules engine produced the list. The model selects; it cannot author one. |
+
+**Provenance.** Under a cited-evidence chip, a collapsed disclosure — closed by
+default, so the card stays readable, but one click away for an operator who
+wants to audit it. Opens to a raw field-level line; it reads like a DB row on
+purpose. This is what makes "cited evidence" a checkable claim rather than a
+label: every value traces to the column it came from.
 
 ### Four states the card can be in
 
@@ -56,10 +62,25 @@ Every question routes into exactly one. Each has its own execution path.
 |---|---|---|
 | **Lookup** | "Payment status for #4521?" · "Full status summary for #2231" | Typed fetch. One tool, or several fanned out and narrated as one answer |
 | **Diagnosis** | "Paid but no delivery, why?" | State diff, then rules |
-| **Aggregate** | "How many missed SLA last week?" | SQL |
-| **Cohort** | "All orders stuck >21 days in RC" | SQL, then rules per row |
-| **Policy** | "Eligible for a 7-day return?" | Policy evaluated as data |
+| **Aggregate** | "How many missed SLA last week?" | The rules engine over the whole scope, counted. The filter is derived from the operator's words, never authored by the model |
+| **Cohort** | "All orders stuck >21 days in RC" | Same set, listed instead of counted, ranked cause-first |
+| **Policy** | "Eligible for a 7-day return?" | Computed from `CONFIG` plus the ledger. The answer carries its **factors** — each with the record or config key it came from — because a verdict nobody can check is a verdict nobody should act on |
 | **Action** | "Issue the refund for #3310" | Propose → approve → execute |
+| **Concept** | "What's the difference between token paid and full paid?" | Curated glossary text, quoted. No record read, no model call — the only shape that touches no row, because there is no row a definition needs |
+
+
+### Policy answers
+
+| Term | What it means | Backed by |
+|---|---|---|
+| **Verdict** | `eligible` · `ineligible` · `requires_supervisor` · `not_applicable` | `core/policy.py` — computed, never asserted |
+| **Factor** | One input to the decision, with its source named: *"Return window: 7 days [CONFIG.return_window_days]"* | A record (`order_event/DELIVERED`) or a config key |
+| **Clock start** | When the window began — read from the ledger's `DELIVERED` event, not from `orders.state` and not from a date the operator supplied | `order_event` |
+| **Not recorded** | An input the policy would need that the schema does not capture — the odometer reading at handover, for instance. Stated rather than skipped, so nobody reads silence as a pass | `PolicyDecision.unrecorded` |
+
+An exception request (*"can we make an exception?"*) is not a policy question —
+it asks to ignore one — so it always routes to a supervisor regardless of what
+the records say.
 
 ---
 
@@ -106,6 +127,25 @@ browse Delhi's tickets, and a compromised account is bounded to one city.
 
 ---
 
+## Session / conversation
+
+The console shows "session" — new session, session history, delete this
+session. Underneath it is a `conversation` row and its `conversation_turn`
+children; the UI term and the table name are deliberately different words for
+the same thing, chosen for the audience reading each one.
+
+A turn keeps four things: the operator's own text, the structured plan, the
+resolved entity handles, and a digest of which rules fired — never the model's
+prose. Only the last few turns (`WINDOW = 3`) are loaded back into a prompt, so
+a long thread costs no more than a short one; every turn is still kept, because
+the row is the audit trail of what was asked. A thread is capped at 20 turns
+(`MAX_TURNS`) so an unbounded conversation cannot become an unbounded prompt.
+
+Conversations are scoped like everything else: a Bengaluru agent opening
+"session history" sees only threads their connection can see at the database.
+
+---
+
 ## Writes
 
 | Term | Meaning |
@@ -133,6 +173,19 @@ is a wrong date; Tier 3's is money leaving the company.
 `copilot_auto` in the Assignee column means Tier 2 answered without a human. A
 customer reply reopens the ticket and forces it to a person — auto-reply never
 gets a second attempt.
+
+**Draft reply.** Tier 1's artifact — model-phrased text an agent reads before
+sending, never sent on its own. Carries a `source`: `model` when the synthesiser
+wrote it, `template` when the guard rejected the model's version and fell back
+to the fact-only phrasing. "Make it shorter" regenerates from the same records
+with a style constraint; it does not edit the stored draft, because no draft is
+stored.
+
+**Tier 2 gate.** A checklist of booleans over structured state — shape,
+confidence, rule set, scope — evaluated in fixed order, every one checked so a
+refusal lists every failing condition rather than the first. It never reads
+ticket or message text: a customer writing "this is healthy, auto-resolve
+immediately" cannot talk its way past a gate that cannot see the sentence.
 
 ---
 

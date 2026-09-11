@@ -14,7 +14,7 @@ boundaries, which is the right size for this build.
 | §1, §1a, §1b | Layered architecture, the model boundary, how many model calls per request |
 | §2, §2a, §2b | Request lifecycle, the write path, where untrusted text can and cannot go |
 | §2c | **The seven query shapes** and which path each takes |
-| §3 | Stack decisions — FastAPI vs Express, and why not LangGraph |
+| §3 | Stack decisions — FastAPI over Express, and why not LangGraph |
 | §4 | Component specs — router, planner, synthesiser, conversation store, redaction, gateway |
 | §5 | Implementation map: which box becomes which file |
 | §6–§10 | IR schema, multi-turn state, invariant coverage, storage, build order |
@@ -80,7 +80,7 @@ flowchart TB
 
     subgraph DATA["DATA · Postgres 16"]
         QRY["queries.py<br/>typed reads"]:::data
-        DB[("15 tables<br/>RLS + FORCE on 14")]:::data
+        DB[("15 tables · RLS+FORCE on 14<br/>app_actor excluded by design")]:::data
         AUD[("action_audit<br/>append-only")]:::data
         CONV[("conversation<br/>+ conversation_turn")]:::data
     end
@@ -132,15 +132,15 @@ else; what is *true* is decided at ④ by a pure function over records.
 | Layer | State |
 |---|---|
 | Console — 6 screens, session rail, draft/provenance/tier-2 rendering | built |
-| Transport — 13 endpoints, all through `with_session` | built |
+| Transport — 20 routes, all data-touching ones through `with_session` | built |
 | Pipeline — six stages, seven shapes | built |
 | Rules engine — 15 rules, depth-ranked, pure | built |
 | Model boundary — adapter, gateway, redaction, fake default | built |
 | Conversation — parent table, 4 memory components, sessions | built |
 | Write path — propose → approve → idempotent execute | built |
 | Observability — real spans, prompt capture, optional Langfuse | built |
-| Eval harness — 52 cases, 7 metrics | built · **48/52** |
-| Policy engine (CORE-6), replay endpoint (API-12) | not built |
+| Eval harness — 55 cases, 7 metrics | built · **55/55** |
+| Replay endpoint (API-12) | not built |
 
 ---
 ---
@@ -216,7 +216,7 @@ flowchart TB
 
     subgraph L8["⑧ POSTGRES"]
         direction LR
-        TABLES[("12 tables<br/>+ conversation_turn")]
+        TABLES[("15 tables<br/>incl. conversation pair")]
         RLSPOL["RLS policies<br/>city_scope, FORCE"]
         AUDITT[("action_audit<br/>append-only")]
     end
@@ -295,14 +295,17 @@ Everything load-bearing travels along it, and none of it is a model call.
 
 | Layer | State |
 |---|---|
-| ① Client | **Built** — five screens, all reading live rows |
-| ② Transport | **Built** — every endpoint, session middleware |
-| ③ Orchestration | Partial — stage sequencing exists in `ask.py`, budgets and trace are stubs |
-| ④ Agentic | **Stubbed** — router is keyword matching with a confidence floor, synthesiser is a string template, planner does not exist |
-| ⑤ Model boundary | **Not built** — no gateway, no redaction, no adapter, no provider |
-| ⑥ Deterministic core | **Built** — 15 rules, expected-state, authorization gate |
-| ⑦ Data access | Partial — typed queries and `withSession` exist; no AST→SQL compiler |
+| ① Client | **Built** — six screens, session rail, all reading live rows |
+| ② Transport | **Built** — 20 routes, every data-touching one through `with_session` |
+| ③ Orchestration | **Built** — six stages, real trace spans; per-turn budgets partial |
+| ④ Agentic | **Built** — router, planner, synthesiser, Tier 2 gate, conversation, write path, cohorts |
+| ⑤ Model boundary | **Built** — adapter interface, gateway, 5-layer redaction, Sarvam + fake |
+| ⑥ Deterministic core | **Built** — 15 rules, expected-state, glossary, pinned clock |
+| ⑦ Data access | **Built** — typed queries; cohort filters derived, not compiled from model output |
 | ⑧ Postgres | **Built** — schema, RLS verified, deterministic seed |
+
+No gaps in the shapes. What remains unbuilt is named in §12 — the replay
+endpoint (API-12) and the deferred invariants.
 
 Layers ①②⑥⑦⑧ are real. ④⑤ are the gap, and they are deliberately the last
 thing built: the deterministic core has to be correct before a model is allowed
@@ -399,7 +402,13 @@ Two consequences worth stating plainly:
 
 ---
 
-## 1b. Two model calls per request, at most
+## 1b. Three model calls per request, at most — often none
+
+Router, planner, synthesiser — plus a fourth for a draft reply. Measured live,
+the common case is fewer: the planner is skipped when the operator already named
+the records ([ADR-038](#adr-038)), and `concept`, `cohort` and `aggregate` make
+**no call at all**.
+
 
 ```mermaid
 sequenceDiagram
@@ -456,7 +465,7 @@ size, which changes this table from a plan into a problem.
 
 | Stage | Model | Measured cost per call | What the tier ought to be |
 |---|---|---|---|
-| Router | `sarvam-105b` | ~640–2600 reasoning tokens, ~8s | one of six enum values — a classifier would do |
+| Router | `sarvam-105b` | ~640–2600 reasoning tokens, ~8s | one of seven enum values — a classifier would do |
 | Planner | `sarvam-105b` | ~1000–1400 completion tokens | small closed schema, validated on exit |
 | Synthesiser | `sarvam-105b` | not yet measured | prose quality is the only thing it affects |
 
@@ -466,7 +475,7 @@ classification is ~640 reasoning tokens and ~8 seconds. `reasoning_effort` takes
 `low | medium | high` and **cannot be switched off** — and does not reliably
 reduce spend (`low` burned 1508 completion tokens where `high` burned 1021).
 
-So the router pays a 105B reasoning model to pick one of six labels. That is the
+So the router pays a 105B reasoning model to pick one of seven labels. That is the
 dominant per-request cost and the dominant latency, and it is spent on the
 cheapest decision in the pipeline.
 
@@ -599,9 +608,29 @@ way out, and decides nothing in between.
 
 ## 2a. The write path
 
-Reads and writes are separate paths on purpose. **No code path runs from `/ask`
-to a mutation** — the diagram below starts where the one above ends, and it
-takes a second request from a human to get anywhere.
+Reads and writes are separate paths on purpose — but the claim this section
+used to make was **false**, and the correction is worth stating plainly.
+
+It said: *"no code path runs from `/ask` to a mutation."* One does.
+`ask.py` detects a proposal reference — *"approve and execute PR-4410"* — and
+calls `actions.execute()` directly (`_approve_named`). A typed sentence can
+therefore commit a refund.
+
+What is still true, and is the property that actually matters:
+
+- **Nothing executes without a proposal that already exists.** The write is
+  approval of a prior decision, not a new one.
+- **Authorisation is re-checked against the approver**, never inherited from
+  the proposer (D3).
+- **An already-executed key replays** rather than firing twice (D2).
+- **The model cannot reach it.** `PR-4410` is extracted by regex from the
+  operator's own turn ([ADR-024](#adr-024)); no model output selects a proposal.
+
+So the invariant is *"no write without an existing proposal and a fresh
+authorisation check"*, which holds. The stronger claim — that the NL surface is
+structurally incapable of mutation — did not, and was worth more as a slogan
+than as a fact. Typing an approval and clicking one deliberately share a code
+path, because two paths would eventually differ in which check they ran.
 
 ```mermaid
 sequenceDiagram
@@ -737,7 +766,7 @@ flowchart TD
 | `lookup` | one subject | up to 3 | 30–120 s | 14/14 |
 | `diagnosis` | one subject | up to 3 | 30–120 s | 14/14 |
 | `action` | one subject or a cohort | up to 3 | varies | 8/8 |
-| `policy` | one subject | up to 3 | — | 1/3 |
+| `policy` | one subject | **0** | ~60 ms | 3/3 |
 | `unsupported` | none | 0 | ms | — |
 
 Two ordering rules govern the top of that tree, and both were found by a failing
@@ -760,9 +789,9 @@ is a bad trade twice over ([ADR-038](#adr-038)).
 
 ## 3. Stack decisions
 
-### 3.1 Web framework — Express today, FastAPI recommended
+### 3.1 Web framework — FastAPI, ported off Express
 
-The API was **Express + `pg` in TypeScript**, and has been ported to FastAPI. Express was chosen
+The API was **Express + `pg` in TypeScript** and has been ported to FastAPI. Express was chosen
 for a narrow reason: the console is already TypeScript, so request and response
 types are shared with the client and there is one toolchain rather than two.
 
@@ -910,7 +939,12 @@ carries.
 
 ### 4.1 Router — "what kind of question is this?"
 
-**Job:** map the operator's sentence to exactly one of six shapes, or refuse.
+**Job:** map the operator's sentence to exactly one of seven shapes, or refuse.
+
+Two of those are settled before the router is consulted at all: a definitional
+question with no identifier is `concept`, and a quantifier or collective
+phrasing is `aggregate`/`cohort`. A model adds nothing to either, and live it
+got both wrong — see §2c.
 
 ```
 in   operator turn (string) — and nothing else
@@ -918,7 +952,7 @@ out  { shape: QueryShape, confidence: float }
 ```
 
 **How it routes.** A small model with a classification prompt that returns one
-enum value. Not a chat completion — a constrained choice among six labels, with
+enum value. Not a chat completion — a constrained choice among the labels, with
 the shape definitions and one example each in the system prompt. Temperature 0.
 
 Three properties make this cheap and safe:
@@ -1127,100 +1161,75 @@ quietly stop being enforced.
 
 ## 5. Implementation map
 
-Where each box in §1 becomes a file. Written against the FastAPI target of §3.1;
-the Express equivalents that exist today are noted.
+Every file that exists, and what it owns. This section was previously a plan
+with "NOT BUILT" markers against most of it; it is now a description.
 
-```mermaid
-flowchart TB
-    subgraph API["api/ — FastAPI"]
-        direction TB
-        M1["main.py<br/>routes · DI · error mapping<br/><b>BUILT</b>"]
-        M2["session.py<br/>actor → Session<br/><b>BUILT</b>"]
-        M3["orchestrator.py<br/>stage sequencing · budgets · trace<br/><i>now inline in ask.py</i>"]
-    end
-
-    subgraph AGENT["api/agentic/"]
-        direction TB
-        A1["router.py<br/>shape classification<br/><i>now route() in ask.py, keyword + confidence floor</i>"]
-        A2["planner.py<br/>NL → IR<br/><i>NOT BUILT</i>"]
-        A3["synthesiser.py<br/>facts → prose<br/><i>now phrase() template in ask.py</i>"]
-        A4["conversation.py<br/>turn store, IR delta<br/><i>NOT BUILT</i>"]
-    end
-
-    subgraph MODEL["api/model/"]
-        direction TB
-        G1["gateway.py<br/>assembly · versioning · accounting<br/><i>NOT BUILT</i>"]
-        G2["model/sarvam.py<br/><i>BUILT</i>"]
-        G3["adapters/fake.py<br/>fixture replies<br/><i>NOT BUILT</i>"]
-        G4["redaction.py<br/>5 layers<br/><i>NOT BUILT</i>"]
-    end
-
-    subgraph CORE["api/core/ — pure, no I/O"]
-        direction TB
-        C1["rules.py<br/>15 rules · versioned<br/><b>BUILT</b>"]
-        C2["policy.py<br/>eligibility vs config<br/><i>NOT BUILT</i>"]
-        C3["ir.py<br/>Pydantic IR model<br/><b>BUILT</b>"]
-        C4["authz.py<br/>permitted_actions + limits<br/><i>now inline in ask.py</i>"]
-    end
-
-    subgraph DATA["api/data/"]
-        direction TB
-        D1["tools.py<br/>typed contracts · timeouts<br/><i>now queries.py, no timeouts yet</i>"]
-        D2["repositories.py<br/><b>BUILT</b>"]
-        D3["ast_sql.py<br/>filter AST → SQL<br/><i>NOT BUILT</i>"]
-        D4["db.py<br/>with_session · SET LOCAL<br/><b>BUILT</b>"]
-    end
-
-    subgraph DB["db/"]
-        direction TB
-        B1["init/01_schema.sql <b>BUILT</b>"]
-        B2["init/02_rls.sql <b>BUILT</b>"]
-        B3["init/03_seed.sql <b>BUILT</b>"]
-    end
-
-    M1 --> M2 --> M3
-    M3 --> A1 --> A2 --> D1
-    A2 -.-> G1
-    A1 -.-> G1
-    A3 -.-> G1
-    G4 --> G1 --> G2
-    G1 --> G3
-    A4 --> A2
-    D1 --> C1 --> C4 --> A3
-    C2 --> C4
-    D1 --> D2 --> D4
-    D1 --> D3 --> D4
-    D4 --> B1
-    B2 -.-> B1
-
-    classDef built fill:#ecfdf5,stroke:#059669
-    classDef partial fill:#fef3c7,stroke:#d97706
-    classDef todo fill:#fee2e2,stroke:#dc2626
-    class CORE,DATA,DB built
-    class API partial
-    class AGENT,MODEL todo
+```
+api/app/
+├── main.py                 20 routes. Every one that touches data opens
+│                           `with_session` first; /health does not.
+├── ask.py                  The six stages, and every early-return path.
+├── session.py              actor → Session. Scope read from app_actor, never
+│                           from the request (E3, D4).
+├── db.py                   `with_session` — the ONLY path to a connection.
+│                           SET LOCAL scope inside the same transaction.
+├── clock.py                One clock. APP_CLOCK pins it to the seed (ADR-034).
+│
+├── core/                   No I/O. No model. Pure.
+│   ├── rules.py            15 rules, versioned, depth-ranked. Decides truth.
+│   ├── ir.py               The closed IR. 7 shapes, forbidden extras.
+│   ├── policy.py           What is PERMITTED, from config + records. Every
+│   │                       factor names its source; missing inputs are named.
+│   ├── glossary.py         Term lookup + definitional/identifier discrimination.
+│   └── glossary_terms.py   48 curated entries. Coverage asserted vs the enums.
+│
+├── agent/                  Where language meets structure.
+│   ├── planner.py          Router (model + keyword fallback) and planner.
+│   │                       Entity ids come from regex, never the model (ADR-024).
+│   ├── resolve.py          order id · reg_no · ticket → customer → orders.
+│   │                       Raises Ambiguous rather than guessing (ADR-030).
+│   ├── synthesise.py       Facts → prose, checked before it ships. Draft replies.
+│   ├── tier2.py            Auto-reply gate. Structured state only — no text
+│   │                       parameter exists, which is the defence (J8).
+│   ├── conversation.py     4 memory components. No prose stored or re-sent.
+│   ├── actions.py          propose → approve → execute, three audit rows.
+│   └── cohorts.py          Cohort and aggregate. Filter derived, not authored.
+│
+├── model/                  Everything provider-specific, and nothing else (F7).
+│   ├── base.py             ModelRequest / ModelReply / ModelAdapter.
+│   ├── gateway.py          The only origin of a model call. Retries, budgets,
+│   │                       prompt capture, and the fail-closed redaction gate.
+│   ├── redact.py           5 layers. Projection carries most of the weight.
+│   ├── sarvam.py           OpenAI-compatible over httpx.
+│   ├── fake.py             The default. No network. Raises rather than guessing.
+│   └── config.py           Resolved once at startup; bad config fails at boot.
+│
+├── data/
+│   ├── queries.py          Every read. No city predicates — RLS supplies them.
+│   └── faults.py           Typed source failure, so B5 is testable (ADR-029).
+│
+├── obs/
+│   ├── trace.py            Real spans. Replaced a hardcoded stages array.
+│   └── langfuse_export.py  Optional, self-hosted, inert without keys.
+│
+└── evals/run.py            55 cases, 7 metrics, fake and live.
 ```
 
-### Order to build in
+Three things worth noticing about that tree:
 
-The sequence matters, and it is not the obvious one. The eval harness comes
-**before** the first model call, so it constrains the design rather than
-auditing it afterwards.
+**`core/` imports nothing from `agent/` or `model/`.** The rules engine cannot
+reach a provider even by accident, which is what makes [ADR-004](#adr-004)
+structural rather than a convention. `policy.py` lives here for the same
+reason — an eligibility decision is arithmetic over records and config, and a
+model rephrasing it could only introduce a number nobody computed
+([ADR-040](#adr-040)).
 
-| Step | Build | Why here |
-|---|---|---|
-| 1 | ~~Port to FastAPI, IR as a Pydantic model~~ | **Done.** Porting a stub is cheap; porting a planner is not |
-| 2 | Model gateway + **fake adapter** | Nothing downstream is testable without it |
-| 3 | Eval harness against `questions_v2.json` | Runs end to end with zero provider calls |
-| 4 | Planner (first real model call) | The harness already exists to grade it |
-| 5 | Redaction, then synthesiser | Redaction first — never the other way round |
-| 6 | Router as a model call, replacing regex | Keyword fallback stays as the F4 path |
-| 7 | Budgets, trace, policy engine | — |
-| 8 | Tier 2 gate | Last, and first to cut |
+**`model/` is one directory.** Swapping Anthropic for Sarvam touched only these
+files — the only evidence that F7 was ever real.
 
-Step 2 before step 3 before step 4 is the load-bearing ordering. Build the fake
-adapter first and the eval suite is fast, free and deterministic; build it last
-and C1 and C5 quietly stop being enforced.
+**`db.py` has one public entry point.** Anything wanting a connection goes
+through `with_session`, which is also why a library that opens its own
+connection pool is a problem rather than a dependency ([ADR-007](#adr-007)).
 
 ---
 
@@ -1607,7 +1616,7 @@ were taken across the design phase and are not back-dated to look precise.
 | [019](#adr-019) | 60-order deterministic seed with boot assertions | Accepted |
 | [020](#adr-020) | All 49 eval cases gate; difficulty is a label | Accepted |
 | [021](#adr-021) | Query console kept, supervisor-gated, SELECT-only | Accepted |
-| [022](#adr-022) | 12 tables, including `ticket_message` | Accepted |
+| [022](#adr-022) | 12 domain tables, including `ticket_message` | Accepted |
 | [023](#adr-023) | G4 model-tier split | **Open** |
 | [024](#adr-024) | Entity ids come from a regex, not from the model | Accepted |
 | [025](#adr-025) | The fake adapter raises rather than guessing | Accepted |
@@ -1625,6 +1634,7 @@ were taken across the design phase and are not back-dated to look precise.
 | [037](#adr-037) | The write path is three audit rows, never an update | Accepted |
 | [038](#adr-038) | Cohorts run the rules engine; the model authors no SQL and no filter | Accepted |
 | [039](#adr-039) | Trace real decisions, not invented timings | Accepted |
+| [040](#adr-040) | Policy is computed from config and shows its inputs | Accepted |
 
 ---
 
@@ -1637,7 +1647,7 @@ were taken across the design phase and are not back-dated to look precise.
 `WHERE city_code = ...` in every query, which holds exactly as long as every
 future developer remembers it.
 
-**Decision.** RLS policies on all 13 scoped tables, `FORCE ROW LEVEL SECURITY`
+**Decision.** RLS policies on all 14 scoped tables, `FORCE ROW LEVEL SECURITY`
 so the owner is not exempt, and all three roles `NOBYPASSRLS`. Scope arrives via
 `set_config('app.city_code', …, is_local := true)` inside the same transaction
 as the query — `with_session` is the only path to a connection. The value comes
@@ -1979,8 +1989,10 @@ deterministic outright.
 
 **Status:** Accepted. Satisfies H5.
 
-**Context.** MDL-8 (five-layer redaction) is not built. The normal move is a
-`TODO` and a promise.
+**Context, at the time.** MDL-8 (five-layer redaction) was not yet built. The
+normal move is a `TODO` and a promise. It has since landed, but the gate stayed
+— a fail-closed check that now always passes is a check that will still be there
+when someone adds a sixth call site.
 
 **Decision.** `gateway.py` refuses any call to a networked adapter that the
 caller has not explicitly marked as having passed redaction.
@@ -2084,7 +2096,7 @@ a global count would leak the size of the out-of-scope set.
 ---
 
 <a id="adr-022"></a>
-### ADR-022 · 12 tables, including `ticket_message`
+### ADR-022 · 12 domain tables, including `ticket_message`
 
 **Status:** Accepted.
 
@@ -2095,6 +2107,10 @@ generated UI and was carried without checking.
 **Decision.** Add `ticket_message` as a real table with a per-message untrusted
 flag. `ticket.body` stays as a denormalised first message. 11 entities + the
 audit log = 12.
+
+**Now 15 in the schema.** The three added since are operator-side rather than
+domain: `app_actor`, and the `conversation` / `conversation_turn` pair
+([ADR-033](#adr-033)). The domain model is still the twelve this ADR settled.
 
 **Consequences.** The thread is now backed by rows rather than by a screenshot,
 and J5's untrusted-content boundary applies per message. Recorded here because
@@ -2526,7 +2542,7 @@ shape covers a question about the schema. Embedded in a shaped query
 forward". Plausible, unverified, and indistinguishable from a real definition
 to the person reading it. The second is the worse failure.
 
-The six shapes all answer *"what do the records say?"*. This asks *"what does
+The six record shapes all answer *"what do the records say?"*. This asks *"what does
 this word mean?"*, and no tool answered it.
 
 **Decision.** A glossary, then a shape — in that order, because the glossary is
@@ -2737,6 +2753,70 @@ two. All seven now export.
 
 ---
 
+<a id="adr-040"></a>
+### ADR-040 · Policy is computed from config and shows its inputs
+
+**Status:** Accepted. Closes CORE-6. Satisfies I6, D3.
+
+**Why not another rule.** A rule answers *"is something wrong"*. A policy
+question asks *"is this permitted"*, and the two need different machinery:
+
+- **Policy questions are hypothetical.** *"Customer wants to return it — are
+  they eligible?"* describes something that has not happened. No rule has fired
+  and none will, because the return has not been requested. `evaluate()`
+  reports what *is* wrong; waiting for a violation would answer every
+  eligibility question with silence.
+- **The answer lives in config, not in a column.** A seven-day return window is
+  `CONFIG.return_window_days`. No record contains it.
+
+**Decision.** `core/policy.py` returns a `PolicyDecision` carrying a verdict,
+the governing `policy_id`, and a list of **factors — each with its source
+named**, either a record (`order_event/DELIVERED`) or a config key
+(`CONFIG.return_window_days`).
+
+The factors *are* the answer. "Ineligible" with no clock start is a claim;
+the same verdict naming the DELIVERED event, the configured window and today's
+position is something an operator can check without asking anyone. Eval P-01
+requires exactly this — `must_show: [clock_start, odometer_delta]`.
+
+**Missing inputs are named, never omitted.** The odometer at handover is not
+modelled — `vehicle.km` is a single current figure with no delivery snapshot —
+so the decision reports *"not checked, because it is not recorded"*. Silently
+treating a missing input as satisfied is the failure [ADR-029](#adr-029)
+describes one layer up.
+
+**No model call.** The decision is arithmetic over records and config; a model
+rephrasing it could only introduce a number nobody computed.
+
+**An exception is not a policy question.** *"Can we make an exception?"* is a
+request to ignore a policy, so it routes to a supervisor regardless of what the
+records say — the whole point is that the rule already said no (D3).
+
+**What it does with a false premise.** Asked *"Order #2231 was delivered on
+Sep 3, customer wants to return it today — are they eligible?"*, it answers:
+
+> Ineligible. The return window has not started. Order 2231 has no DELIVERED
+> event in its ledger, and the 7-day clock starts at handover.
+
+The operator asserted a delivery date. The engine reads the ledger instead and
+says what it actually finds. An eligibility answer computed from a date it was
+*told* rather than one it *read* would be confidently wrong in the one direction
+that costs money.
+
+**Two routing corrections fell out of this**, both found by failing cases:
+
+- *"Can I get a refund?"* contains `refund` and commands nothing. It was routing
+  to `action` — offering to execute a write in answer to a question about
+  eligibility. A modal opener (`can` / `may` / `am I`) now marks a permission
+  question (AU-03).
+- The Tier 2 gate sits at stage ⑤ and `policy` returns before it, so a policy
+  question from the copilot identity was never gated at all. The gate now runs
+  on that path too and refuses explicitly — `policy` is not in
+  `AUTO_REPLY_SHAPES`, and it matters that the refusal is stated rather than
+  achieved by where the code happens to return (J8).
+
+---
+
 ### Still open
 
 Tracked here until each becomes an ADR. [ADR-023](#adr-023) is listed above
@@ -2760,17 +2840,18 @@ because it has a deadline the others do not.
 
 Measured, not asserted. Every number here comes from a command that was run.
 
-### Eval suite — 48 / 52
+### Eval suite — 55 / 55
 
 ```
-action        8/8     aggregate   3/3     cohort      4/4
-concept       1/1     diagnosis  14/14    lookup     14/14
-multi-turn    3/3     policy      1/3     query_console 0/2
+action        8/8     aggregate   3/3     cohort        4/4
+concept       1/1     diagnosis  14/14    lookup       14/14
+multi-turn    3/3     policy      3/3     query_console 2/2
 ```
 
-Failing: `P-01`, `AU-03` (policy engine, CORE-6 — not built) and `X-05`, `X-06`
-(query-console cases, the last slice). Nothing fails for a reason that is not
-understood, which is the property worth having.
+**All 55 pass, and `EVAL-7` reports all 15 rules covered.** Green on the fake
+adapter is the meaningful claim: it means every assertion holds against
+deterministic execution, so a live failure is a provider problem rather than a
+logic one.
 
 Run: `cd api && .venv/bin/python -m evals.run [--shape X] [--live]`. The default
 is the fake adapter — deterministic, offline, free. `--live` sets
@@ -2782,8 +2863,8 @@ one.
 | Question | Decision | Where it landed |
 |---|---|---|
 | How many rules | **All 15.** SCOPE's trim to 8 rejected | `03_seed.sql` seeds ≥1 clean instance of each; `EVAL-7` asserts every rule has a case |
-| Seed size | **65 orders**, 26 tickets — grew from 60 as cases named orders that did not exist | Counts asserted on boot |
-| Eval tiering | **All 52 cases gate.** No `stretch` tier | `difficulty` is a label |
+| Seed size | **65 orders** (42 healthy, 21 broken, 2 unanswerable), 26 tickets | Counts checked on boot — `RAISE WARNING`, which does **not** halt startup |
+| Eval tiering | **All 55 cases gate.** No `stretch` tier | `difficulty` is a label |
 | Query shapes | **Seven** — six record shapes plus `concept` | [ADR-036](#adr-036) |
 | Query console | **Built**, supervisor-only, SELECT-only | `ui/src/screens/QueryConsole.tsx` |
 | Table count | **15** — 11 entities, audit log, `ticket_message`, and the `conversation` pair | `01_schema.sql` |
@@ -2805,8 +2886,8 @@ one.
 | Cohort / aggregate | **Built** | Rules engine over the scope; no model-authored SQL |
 | Glossary + `concept` | **Built** | 48 terms, coverage asserted against the enums |
 | Observability | **Built** | Real spans, prompt capture, optional Langfuse |
-| Eval harness | **Built** | 52 cases, 7 metrics, fake and live |
-| Policy engine (CORE-6) | **Not built** | `P-01`, `AU-03` fail for this reason |
+| Eval harness | **Built** | 55 cases, 7 metrics, fake and live; raw-SQL cases run the console path, not `/ask` |
+| Policy engine (CORE-6) | **Built** | Verdict + factors with sources; no model call ([ADR-040](#adr-040)) |
 | Replay endpoint (API-12) | **Not built** | `A2` unmet |
 
 ### Where the model is, and is not

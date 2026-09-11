@@ -327,9 +327,16 @@ async def plan(
     Returns `(ir, injection_flagged)`, or None if the caller should degrade.
 
     `context` is untrusted — ticket subject, customer message, stored evidence.
-    It is wrapped and scrubbed before it goes anywhere near the prompt, and it
-    can only ever widen the fetch set. It cannot pick the shape: that argument
-    is passed in, already decided by the router from the operator's turn alone.
+    It is wrapped and scrubbed before it goes anywhere near the prompt. It
+    cannot pick the shape: that argument is passed in, already decided by the
+    router from the operator's turn alone.
+
+    NOTE, corrected after an audit: this does **not** widen the fetch. The
+    snapshot is fixed-shape and is taken before this runs. The `wants` returned
+    here become wildcard sub-entities in the reported IR and in conversation
+    memory; they do not change which SQL executes. The docstring previously said
+    otherwise, which made the planner sound like it was doing a job nothing in
+    the codebase asks of it.
     """
     flagged = False
     safe_query, scrub_hits = scrub_operator_turn(query.strip())

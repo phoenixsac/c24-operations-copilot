@@ -93,7 +93,7 @@ Each invariant, when violated, is a named rule. This table is the rules-engine s
 | rule_id | Invariant violated | Blocking entity | Suggested action |
 |---|---|---|---|
 | `payment_capture_lag` | Payment captured, order state not advanced >30m | payment | replay_webhook |
-| `rc_transfer_stall` | FULL_PAID >72h, rc_case not done | rc_case | escalate_rto |
+| `rc_transfer_stall` | FULL_PAID >48h, rc_case not done | rc_case | escalate_rto |
 | `refurb_overrun` | refurb_job past promised_at | refurb_job | notify_customer_delay |
 | `delivery_slot_missing` | RC_DONE >24h, no delivery row | — | schedule_delivery |
 | `delivery_attempts_exhausted` | delivery.attempt_count ≥ 3 | delivery | call_customer |
@@ -107,6 +107,8 @@ Each invariant, when violated, is a named rule. This table is the rules-engine s
 | `ticket_reopen_loop` | Reopened ≥2 times | ticket | escalate_supervisor |
 | `ticket_orphaned` | No order_id, resolution attempted | ticket | request_identifier |
 | `ticket_stale_blocked` | AWAITING_CUSTOMER >7d, no follow-up | ticket | auto_followup |
+
+> **One threshold disagrees with its own constant.** `CONFIG.rc_stall_hours` is 72, but `rules.py` tests `> rc_stall_hours - 24` — so the rule fires at 48 hours. The `- 24` is undocumented and unexplained. This table reports what the code does; whether the constant or the predicate is the mistake is an open question, and the honest reading is that one of them was changed without the other.
 
 ---
 
@@ -156,7 +158,7 @@ A missed filter now returns zero rows rather than everyone's rows.
 
 ## 7. Seed plan
 
-60 orders plus tickets. Fully deterministic — no RNG at all, so a re-seed is byte-identical (C7). Implemented in `db/init/03_seed.sql`, which asserts the counts on boot.
+65 orders and 26 tickets. Fully deterministic — no RNG at all, so a re-seed is byte-identical (C7). Implemented in `db/init/03_seed.sql`, which asserts the counts on boot. It grew from 60 as eval cases named orders the seed did not have; the assertions are what made each gap loud rather than silent.
 
 | Bucket | Count | Purpose |
 |---|---|---|

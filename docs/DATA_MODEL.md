@@ -12,8 +12,15 @@ snapshot; this is closer to the snapshot itself.
 
 ## 1. Entity relationships
 
-Twelve tables — eleven entities plus the audit log — with `app_actor` and
-`conversation_turn` as infrastructure.
+Fifteen tables. Twelve are the domain — eleven entities plus the append-only
+audit log — and three are operator-side infrastructure: `app_actor`, and the
+`conversation` / `conversation_turn` pair.
+
+The split matters when reading the RLS policies below: every one of the fifteen
+carries `city_code` and `region` and is covered by the same `city_scope` policy,
+but only the conversation pair grants `DELETE` to `app_user`. A conversation is
+an operator's working notes and is theirs to clear; nothing about the business
+is.
 
 ```mermaid
 erDiagram
@@ -31,8 +38,11 @@ erDiagram
     VEHICLE ||--o{ REFURB_JOB : "reconditioned by"
     PAYMENT ||--o{ REFUND     : "reversed by"
 
-    TICKET ||--o{ TICKET_MESSAGE    : "thread of"
-    TICKET ||--o{ CONVERSATION_TURN : "copilot history"
+    TICKET ||--o{ TICKET_MESSAGE : "thread of"
+
+    TICKET       ||--o{ CONVERSATION      : "threads about"
+    APP_ACTOR    ||--o{ CONVERSATION      : owns
+    CONVERSATION ||--o{ CONVERSATION_TURN : "turns of"
 
     APP_ACTOR ||--o{ TICKET       : "assigned to"
     APP_ACTOR ||--o{ ACTION_AUDIT : proposes

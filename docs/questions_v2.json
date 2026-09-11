@@ -837,6 +837,48 @@
       ],
       "note": "the question that produced an invented definition before the glossary existed. Answered from curated text, no model call, no records read. ADR-036",
       "difficulty": "core"
+    },
+    {
+      "id": "W-07",
+      "query": "Refund all the orders stuck in RC transfer",
+      "shape": "action",
+      "expect": {
+        "executed": false,
+        "proposal": {
+          "bulk": true,
+          "shows_count": true
+        },
+        "proposal_persisted": true
+      },
+      "note": "a proposal that cannot be approved is not a proposal. W-03 asserts nothing executed; this asserts the other half — that the lifecycle can actually continue. Found by audit: _bulk_proposal never called record_proposal",
+      "difficulty": "core"
+    },
+    {
+      "id": "G-01",
+      "turns": [
+        {
+          "query": "Why is order #1289 stuck?"
+        },
+        {
+          "query": "Why is order #3110 stuck?"
+        }
+      ],
+      "shape": "diagnosis",
+      "expect": {
+        "tokens_are_per_request": true
+      },
+      "note": "the trace reports token spend for THIS request. Gateway counters were process-cumulative, so turn 2 reported turn 1's tokens plus its own and the number only ever grew",
+      "difficulty": "core"
+    },
+    {
+      "id": "G-02",
+      "query": "Why is order #1289 stuck?",
+      "shape": "diagnosis",
+      "expect": {
+        "plan_decision_recorded": true
+      },
+      "note": "the planner's decision must be auditable: either it ran and its IR validated, or it was skipped with a stated reason. Originally asserted plan-before-resolve, which encoded the wrong requirement — the snapshot is fixed-shape, so there is no selective fetch for a planner to widen and reordering would only move a no-op earlier",
+      "difficulty": "hard"
     }
   ]
 }

@@ -82,9 +82,15 @@ async def record_proposal(
     )
 
 
-async def find_proposal(sql: Sql, proposal_id: str, key: str) -> dict | None:
+async def find_proposal(sql: Sql, key: str) -> dict | None:
     """
-    The pending proposal for this key.
+    The pending proposal for this idempotency key.
+
+    Took a `proposal_id` it never used. The key is the identity that matters —
+    it is derived from (action, subject, cause), so two proposals for the same
+    thing collide on purpose (D2) — but a parameter the body ignores is a claim
+    the function does not honour, and the next person to read it would assume
+    both were checked.
 
     RLS already scoped the read, so a proposal from another city is simply not
     here — the caller sees "no proposal", which is the same answer it would get
