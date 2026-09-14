@@ -19,6 +19,7 @@ row-by-row status.
 
 | Doc | What it is |
 |---|---|
+| [PANEL_GUIDE.md](PANEL_GUIDE.md) | Source-grounded, beginner-friendly guide for explaining the complete implementation to a panel: architecture, flows, agentic concepts, security, evals, limitations, demo order, and likely questions |
 | [README_v3.md](README_v3.md) | The submission-level overview: position, usage model, autonomy tiers, entities, auth, storage, assumptions, rules, evals, query shapes, API, console, principles |
 | [DOMAIN_v2.md](DOMAIN_v2.md) | Data model only: 11 tables + audit log, order state machine, ticket lifecycle, invariant→rule table, scoping, RLS, seed plan |
 | [INVARIANTS.md](INVARIANTS.md) | The falsifiable requirement list (A–J, I). Each invariant paired with how it's verified |
