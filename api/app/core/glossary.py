@@ -81,16 +81,68 @@ def names_a_record(query: str) -> bool:
     return _IDENTIFIER.search(query) is not None
 
 
+# Words allowed to trail a term in a genuinely definitional question. Anything
+# else after the term means the sentence is asking about that thing rather than
+# asking what the word means.
+_DEFINITIONAL_TAIL = re.compile(
+    r"^[\s\W]*(?:"
+    r"mean(?:s|ing)?|exactly|precisely|here|in this (?:system|context)|"
+    r"again|really|actually|and|or|vs|versus"
+    r"|[\s\W]"
+    r")*$",
+    re.I,
+)
+
+
+def _asks_about_the_word(query: str) -> bool:
+    """
+    Does the sentence stop at the term, or keep going?
+
+    "What is TOKEN_PAID?" stops — the term is the whole object of the question.
+    "What is the customer asking for?" keeps going, and `asking for` is the real
+    question: it is about a record's contents, not about what the word
+    `customer` means.
+
+    Both open with "what is" and both mention a glossary term, so the phrasing
+    test alone cannot separate them. This looks at what follows the last term
+    matched, allowing only the filler a definitional question actually ends on.
+
+    Found live: "What is the customer asking for?", asked with a ticket open,
+    returned the glossary definition of `customer` — a correct answer to a
+    question nobody asked.
+    """
+    hits = find(query)
+    if not hits:
+        return False
+
+    haystack = query.replace("_", " ")
+    end = 0
+    for term in hits:
+        m = re.search(
+            r"\b" + re.escape(term.term.replace("_", " ")) + r"\b", haystack, re.I
+        )
+        if m:
+            end = max(end, m.end())
+    return _DEFINITIONAL_TAIL.match(haystack[end:]) is not None
+
+
 def wants_definition(query: str) -> bool:
     """
-    Definitional phrasing AND no identifier.
+    Definitional phrasing, no identifier, and nothing trailing the term.
 
     The first version tested only the phrasing, which meant "what is the status
     of order 4521?" pulled in the definition of "order" — the word is a glossary
     key and the sentence contains it. Correct behaviour there is to say nothing:
     the operator is asking about a row, not about vocabulary.
+
+    The third clause closes the same hole for sentences carrying no identifier at
+    all, where the subject is the open ticket rather than a quoted id.
     """
-    return DEFINITIONAL.search(query) is not None and not names_a_record(query)
+    return (
+        DEFINITIONAL.search(query) is not None
+        and not names_a_record(query)
+        and _asks_about_the_word(query)
+    )
 
 
 def canonical(word: str) -> str | None:

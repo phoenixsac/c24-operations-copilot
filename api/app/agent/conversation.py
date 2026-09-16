@@ -297,7 +297,18 @@ def to_prior(rows: list[dict]) -> "PriorTurnLike | None":
 
     last_ir = rows[-1]["ir"] or {}
     last_digest = rows[-1]["result_digest"] or {}
-    shape = last_ir.get("shape")
+
+    # The last shape that actually ran. A refusal is not a question, so "and
+    # now?" after one must repeat the last real question rather than repeat the
+    # refusal — otherwise one off-domain turn makes the rest of the thread
+    # unanswerable. Entities already union across the window; this makes the
+    # shape survive the same way.
+    shape = None
+    for row in reversed(rows):
+        candidate = (row["ir"] or {}).get("shape")
+        if candidate and candidate != "unsupported":
+            shape = candidate
+            break
     return PriorTurn(
         entities=entities,
         rule_ids=list(last_digest.get("rule_ids") or []),

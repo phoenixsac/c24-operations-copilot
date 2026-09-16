@@ -240,6 +240,67 @@ _AGGREGATE_SURE = re.compile(
 )
 
 
+# Every word this domain knows: anchors, shape cues and glossary vocabulary.
+# Derived from the lists above rather than restated, so a cue added for routing
+# is automatically a word a follow-up may use.
+_DOMAIN_VOCAB: frozenset[str] = frozenset(
+    word
+    for phrase in (
+        [*_DOMAIN_ANCHORS]
+        + [c for _, cues in _SHAPE_CUES for c in cues]
+        + [*glossary.TERMS.keys(), *glossary.ALIASES.keys()]
+    )
+    for word in re.findall(r"[a-z]{3,}", phrase.lower().replace("_", " "))
+)
+
+
+# Words that carry no subject of their own: articles, auxiliaries, pronouns,
+# interrogatives, and the deictics a follow-up leans on. A turn built only from
+# these plus domain vocabulary is asking about whatever the thread was already
+# about.
+_FUNCTION_WORDS = frozenset("""
+and now also then still yet so but or if the a an of to for from in on at by
+with about into over under is are was were be been being am do does did done
+have has had will would shall should can could may might must
+i we you they it he she this that these those there here them us me my our your
+their its what which who whom whose where when why how not no nor any some
+again more less any anything something still ok okay please just sorry thanks
+""".split()) | frozenset("""
+summarise summarize explain tell show give list check look see know happen
+happening going get got fix fixed sort sorted update updated progress next
+left news latest thing things yet already now today yesterday tomorrow
+else pending outstanding remaining other others rest
+""".split())
+
+
+def _introduces_subject(query: str) -> bool:
+    """
+    Does this turn name a topic of its own, or does it lean on the thread?
+
+    "And now?", "who do I escalate to?", "will this resolve?" name nothing — every
+    word is either a function word or domain vocabulary, so the subject has to
+    come from the previous turn. "What is the weather in Mumbai tomorrow?" names
+    `weather` and `tomorrow`, which belong to no part of this domain.
+
+    WHY THIS EXISTS. The conversation rescue below used to fire on *any*
+    unclassified turn inside a live thread. That is right for an under-specified
+    follow-up and wrong for an unrelated question: asked after a successful
+    diagnosis, "what is the weather in Mumbai tomorrow?" inherited order 1289 and
+    answered about the RC transfer. Confidently, with evidence, about something
+    nobody asked. Found by running the demo path in the README rather than by a
+    test, which is why there is now a case for it.
+
+    Deliberately conservative: an unknown word means refuse. A follow-up phrased
+    in vocabulary this domain does not have loses its rescue and gets a refusal,
+    which is the safe direction to be wrong in.
+    """
+    known = _FUNCTION_WORDS | _DOMAIN_VOCAB
+    for word in re.findall(r"[a-z]{3,}", query.lower()):
+        if word not in known:
+            return True
+    return False
+
+
 def _settled_shape(query: str) -> QueryShape | None:
     """
     The shape when no judgement is required. `None` means ask the model.
@@ -1128,6 +1189,16 @@ async def ask(
 
     in_conversation = bool(prior and prior.entities)
 
+    # A live thread is an anchor only for a turn that needs one. The keyword
+    # router treats `in_conversation` as standing in for a subject the sentence
+    # did not name — which is right for "and now?" and wrong for a question that
+    # named a subject of its own and simply is not about this domain.
+    #
+    # Both the primary keyword path and the rescue below read this, because
+    # gating only the rescue left the hole open: with no gateway configured the
+    # first call already goes to the keyword router, already anchored.
+    anchored_by_thread = in_conversation and not _introduces_subject(query)
+
     # Shapes we can settle without asking anything.
     #
     # "How many deliveries missed SLA last week" and "anything I should look at
@@ -1174,7 +1245,7 @@ async def ask(
         shape, confidence = routed
         model_used = gw.model_name
     elif settled is None:
-        shape, confidence = route(query, in_conversation=in_conversation)
+        shape, confidence = route(query, in_conversation=anchored_by_thread)
 
     # J7 means the router sees the operator's turn and nothing else — so it
     # cannot know that "Who do I escalate to?" is the second turn about order
@@ -1189,7 +1260,13 @@ async def ask(
     #
     # Found live: the fake adapter degrades to the keyword router, which was
     # already conversation-aware, so M-01 passed there and failed here.
-    if shape is QueryShape.UNSUPPORTED and in_conversation:
+    #
+    # The rescue is conditional on the turn being under-specified. Context may
+    # supply a subject the sentence omitted; it may not supply a different
+    # subject from the one the sentence named. "What is the weather in Mumbai
+    # tomorrow?" names its own topic and is simply not about this domain, so it
+    # refuses whether or not a thread is open.
+    if shape is QueryShape.UNSUPPORTED and anchored_by_thread:
         shape, confidence = route(query, in_conversation=True)
 
     # "And now?" inherits the previous turn's shape. It is not a new question,
@@ -1198,7 +1275,7 @@ async def ask(
     # between turns and requires the second answer to differ.
     if prior and prior.shape and (
         _CONTINUATION.match(query.strip())
-        or (shape is QueryShape.UNSUPPORTED and in_conversation)
+        or (shape is QueryShape.UNSUPPORTED and anchored_by_thread)
     ):
         shape = prior.shape
         confidence = max(confidence, 0.6)

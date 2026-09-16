@@ -47,7 +47,10 @@ import re  # noqa: E402
 
 from app.session import Role, resolve_session  # noqa: E402
 
-FIXTURE = Path(__file__).resolve().parents[2] / "docs" / "questions_v2.json"
+# Next to the harness, not under docs/. The fixture is not documentation — it
+# is the thing the suite executes, it is asserted on structure rather than
+# prose, and it has to ship wherever the harness ships.
+FIXTURE = Path(__file__).resolve().parent / "questions_v2.json"
 
 
 @dataclass
@@ -429,26 +432,47 @@ def _mutations_for(turn: dict) -> list[tuple[str, str]]:
     return out
 
 
-def _carry(answer: dict) -> PriorTurn:
+def _carry(answer: dict, prior: PriorTurn | None = None) -> PriorTurn:
     """
     The four memory components, minus the prose. Mirrors what the API stores in
     `conversation_turn` so the harness exercises the same carry the console
     does — a harness that threads richer context than production would grade a
     system nobody ships. ADR-010.
+
+    It used to read the last answer alone, which threaded *poorer* context than
+    production and is the same bug from the other direction: `to_prior` unions
+    entities across the whole window and takes the last shape that actually ran,
+    so a three-turn case could fail here while working in the console. Found by
+    M-06, whose middle turn is a refusal.
     """
     from app.core.ir import QueryShape
 
-    shape = answer.get("ir", {}).get("shape")
+    entities = list(prior.entities) if prior else []
+    seen = {(e.type.value, str(e.id)) for e in entities}
+    for e in answer.get("ir", {}).get("entities", []):
+        if e["type"] not in {t.value for t in EntityType}:
+            continue
+        key = (e["type"], str(e["id"]))
+        if key not in seen:
+            seen.add(key)
+            entities.append(EntityRef(type=EntityType(e["type"]), id=e["id"]))
+
+    # A refusal is not a question, so it does not become the shape a later
+    # continuation repeats.
+    raw = answer.get("ir", {}).get("shape")
+    shape = QueryShape(raw) if raw in {s.value for s in QueryShape} else None
+    if shape is QueryShape.UNSUPPORTED and prior is not None:
+        shape = prior.shape
+
     return PriorTurn(
-        entities=[
-            EntityRef(type=EntityType(e["type"]), id=e["id"])
-            for e in answer.get("ir", {}).get("entities", [])
-            if e["type"] in {t.value for t in EntityType}
-        ],
+        entities=entities,
         rule_ids=[r["rule_id"] for r in answer.get("fired_rules") or []],
-        shape=QueryShape(shape) if shape in {s.value for s in QueryShape} else None,
-        draft_style=answer.get("draft_style"),
-        injection_flagged=bool(answer.get("injection_flagged")),
+        shape=shape,
+        draft_style=answer.get("draft_style") or (prior.draft_style if prior else None),
+        injection_flagged=(
+            bool(answer.get("injection_flagged"))
+            or bool(prior.injection_flagged if prior else False)
+        ),
     )
 
 
@@ -582,7 +606,7 @@ async def run_case(case: dict, gw, default_actor: str) -> Result:
                 )
                 answer["proposal_persisted"] = row is not None
             # Carry only structure forward — never the prose. ADR-010.
-            prior = _carry(answer)
+            prior = _carry(answer, prior)
         finally:
             for restore_sql in reversed(undo):
                 await sql.all(restore_sql)

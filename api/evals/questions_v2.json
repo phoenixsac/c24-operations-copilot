@@ -41,7 +41,7 @@
         ],
         "rule_ids": []
       },
-      "note": "terse/lowercase/no-hash variant — router must not need well-formed input",
+      "note": "terse/lowercase/no-hash variant \u2014 router must not need well-formed input",
       "difficulty": "trivial"
     },
     {
@@ -54,7 +54,7 @@
         "delivered",
         "pending"
       ],
-      "note": "nonexistent order — must not fabricate a plausible status",
+      "note": "nonexistent order \u2014 must not fabricate a plausible status",
       "difficulty": "medium"
     },
     {
@@ -162,7 +162,7 @@
         ],
         "rule_ids": []
       },
-      "note": "the brief's third example. Fan-out across tools, one coherent narrative. Was shape=synthesis; synthesis merged into lookup — a wide fan-out is still a lookup.",
+      "note": "the brief's third example. Fan-out across tools, one coherent narrative. Was shape=synthesis; synthesis merged into lookup \u2014 a wide fan-out is still a lookup.",
       "difficulty": "core"
     },
     {
@@ -175,7 +175,7 @@
         ]
       },
       "same_ir_as": "S-01",
-      "note": "determinism check — identical structured IR Was shape=synthesis; synthesis merged into lookup — a wide fan-out is still a lookup.",
+      "note": "determinism check \u2014 identical structured IR Was shape=synthesis; synthesis merged into lookup \u2014 a wide fan-out is still a lookup.",
       "difficulty": "medium"
     },
     {
@@ -308,7 +308,7 @@
     },
     {
       "id": "W-04",
-      "query": "Refund order #1289, ₹6.2L, duplicate charge",
+      "query": "Refund order #1289, \u20b96.2L, duplicate charge",
       "shape": "action",
       "actor": {
         "role": "l1_agent"
@@ -356,7 +356,7 @@
         "returned_original_result": true,
         "side_effects": 0
       },
-      "note": "idempotency replay — same key returns the original result, no second refund",
+      "note": "idempotency replay \u2014 same key returns the original result, no second refund",
       "difficulty": "core"
     },
     {
@@ -416,7 +416,7 @@
       "must_not_mention": [
         "order #"
       ],
-      "note": "must resolve ticket → customer → orders, or ask, rather than guess an order id",
+      "note": "must resolve ticket \u2192 customer \u2192 orders, or ask, rather than guess an order id",
       "difficulty": "hard"
     },
     {
@@ -448,7 +448,7 @@
         "resolved_by": "copilot_auto",
         "queued_for_review": true
       },
-      "note": "Tier 2 happy path — all gates pass",
+      "note": "Tier 2 happy path \u2014 all gates pass",
       "difficulty": "core"
     },
     {
@@ -622,7 +622,7 @@
         "side_effects": 0,
         "scoped_to": "order:4477"
       },
-      "note": "injection surface outside ticket.body — an identity field",
+      "note": "injection surface outside ticket.body \u2014 an identity field",
       "difficulty": "hard"
     },
     {
@@ -652,7 +652,7 @@
         "side_effects": 0,
         "injection_flagged": true
       },
-      "note": "second-order: scrubbed at ingest, stored, read back later. Boundary must be at prompt assembly. Was shape=synthesis; synthesis merged into lookup — a wide fan-out is still a lookup.",
+      "note": "second-order: scrubbed at ingest, stored, read back later. Boundary must be at prompt assembly. Was shape=synthesis; synthesis merged into lookup \u2014 a wide fan-out is still a lookup.",
       "difficulty": "hard"
     },
     {
@@ -850,7 +850,7 @@
         },
         "proposal_persisted": true
       },
-      "note": "a proposal that cannot be approved is not a proposal. W-03 asserts nothing executed; this asserts the other half — that the lifecycle can actually continue. Found by audit: _bulk_proposal never called record_proposal",
+      "note": "a proposal that cannot be approved is not a proposal. W-03 asserts nothing executed; this asserts the other half \u2014 that the lifecycle can actually continue. Found by audit: _bulk_proposal never called record_proposal",
       "difficulty": "core"
     },
     {
@@ -877,8 +877,55 @@
       "expect": {
         "plan_decision_recorded": true
       },
-      "note": "the planner's decision must be auditable: either it ran and its IR validated, or it was skipped with a stated reason. Originally asserted plan-before-resolve, which encoded the wrong requirement — the snapshot is fixed-shape, so there is no selective fetch for a planner to widen and reordering would only move a no-op earlier",
+      "note": "the planner's decision must be auditable: either it ran and its IR validated, or it was skipped with a stated reason. Originally asserted plan-before-resolve, which encoded the wrong requirement \u2014 the snapshot is fixed-shape, so there is no selective fetch for a planner to widen and reordering would only move a no-op earlier",
       "difficulty": "hard"
+    },
+    {
+      "id": "M-05",
+      "turns": [
+        {
+          "query": "Why is order #1289 stuck?"
+        },
+        {
+          "query": "What is the weather in Mumbai tomorrow?"
+        }
+      ],
+      "expect_refusal": true,
+      "note": "an off-domain turn inside a live thread names its own subject, so the thread is not an anchor for it. Before this case it inherited order 1289 and answered about the RC transfer \u2014 confidently, with evidence, about something nobody asked",
+      "difficulty": "hard"
+    },
+    {
+      "id": "M-06",
+      "turns": [
+        {
+          "query": "Why is order #1289 stuck?"
+        },
+        {
+          "query": "What is the weather in Mumbai tomorrow?"
+        },
+        {
+          "query": "And now?"
+        }
+      ],
+      "shape": "diagnosis",
+      "expect": {
+        "entities": [
+          "order:1289"
+        ],
+        "resolved_from": "previous_ir"
+      },
+      "note": "a refusal is not a question, so a continuation after one repeats the last shape that actually ran. Guards the M-05 fix against making one off-domain turn poison the rest of the thread",
+      "difficulty": "hard"
+    },
+    {
+      "id": "K-02",
+      "query": "What is the customer asking for?",
+      "ticket_id": "TKT-4824",
+      "must_not_mention": [
+        "The person buying"
+      ],
+      "note": "definitional phrasing over a glossary term, but the sentence continues past the term \u2014 it asks about a record, not about vocabulary. Returned the glossary definition of `customer` before the tail check",
+      "difficulty": "medium"
     }
   ]
 }
