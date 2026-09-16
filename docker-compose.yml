@@ -99,6 +99,13 @@ services:
       - 'host.docker.internal:host-gateway'
     ports:
       - '${API_PORT:-8000}:8000'
+    volumes:
+      # The eval fixture, read-only. `evals/run.py` looks two levels above
+      # itself for `docs/questions_v2.json`, which is the repo root locally and
+      # `/` in the image — so this mount makes the same path work in both
+      # without a second code path. Mounted rather than copied so editing a
+      # case does not require a rebuild.
+      - ./docs:/docs:ro
     depends_on:
       db:
         condition: service_healthy

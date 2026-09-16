@@ -34,6 +34,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -353,9 +354,28 @@ _CLEAR_PR = "DELETE FROM action_audit WHERE idempotency_key = 'key-pr-4410'"
 # through `with_session` as a scoped `app_user`, so no case can pass because the
 # harness saw or wrote something an operator could not. Only the scaffolding is
 # privileged.
-ADMIN_URL = os.getenv(
-    "ADMIN_DATABASE_URL", "postgres://postgres:postgres@localhost:55432/copilot"
-)
+# Derived from DATABASE_URL rather than hardcoded. It was
+# `postgres://postgres:postgres@localhost:55432/copilot`, which is one
+# developer's port mapping: every clone that ran the suite anywhere else — in
+# the container, where the database is `db:5432` — failed W-05 and W-06 on a
+# connection error in the teardown, not on anything the case asserted.
+#
+# Same host, same port, same database as the application; only the credentials
+# change, which is the single thing the scaffolding actually needs.
+def _admin_url() -> str:
+    explicit = os.getenv("ADMIN_DATABASE_URL")
+    if explicit:
+        return explicit
+    app_url = os.getenv("DATABASE_URL", "postgres://app_user:app_user@localhost:5432/copilot")
+    parsed = urlsplit(app_url)
+    host = parsed.hostname or "localhost"
+    netloc = f"postgres:postgres@{host}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunsplit(parsed._replace(netloc=netloc))
+
+
+ADMIN_URL = _admin_url()
 
 
 async def _admin(statements: list[str]) -> None:
