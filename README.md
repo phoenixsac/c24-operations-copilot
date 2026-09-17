@@ -239,6 +239,78 @@ Every step below was run against a clean clone; the quoted output is real.
 
 ---
 
+## What to test where
+
+**Read this before poking at random tickets.** 42 of the 65 seeded orders are
+deliberately healthy, so a ticket picked at random will often have nothing wrong
+with it — and the copilot will correctly say so. That is the system working, not
+failing. The table below says which ticket exercises which condition.
+
+Every row was produced by running the rules engine over the seed, not written
+from memory.
+
+### By ticket
+
+| Ticket | Order | Ask | What fires |
+|---|---|---|---|
+| **TKT-4821** | 1289 | *Why is this stuck?* | `rc_transfer_stall` — blocked on `seller_noc_missing` |
+| **TKT-4828** | 1720 | *Why is this stuck?* | `inventory_double_allocation` — one car, two orders |
+| **TKT-4834** | 3660 | *Why is this stuck?* | `delivery_attempts_exhausted` — four failed attempts |
+| **TKT-4833** | 3550 | *Why is this stuck?* | `delivery_slot_missing` — RC done, nobody scheduled it |
+| **TKT-4827** | 2044 | *Why is this stuck?* | `payment_capture_lag` |
+| **TKT-4823** | 3310 | *Issue the refund for order #3310* | `refund_duplication` → proposes `freeze_and_review`, **not** a refund |
+| **TKT-4829** | 2890 | *Can we accept this return?* | `policy` — eligible, 2.5 days left of the 7-day window |
+| **TKT-4824** | — | *Summarise this ticket* | `ticket_orphaned` **and** an injection attempt in the body |
+| **TKT-4835** | 3770 | *Why is this stuck?* | `ticket_first_response_breach` |
+| **TKT-4837** | 3990 | *Why is this stuck?* | `ticket_reopen_loop` |
+| **TKT-4838** | 4090 | *Why is this stuck?* | `ticket_stale_blocked` |
+| **TKT-4836** | 3880 | *Why is this stuck?* | `ticket_resolved_without_cause` |
+| **TKT-4822** | 3110 | *Why is this stuck?* | `refurb_overrun` (depth 1) **+** `delivery_slot_missing` (depth 3) |
+| **TKT-4831** | 3420 | *Why is this stuck?* | three rules at once — depth ordering decides the headline |
+| **TKT-6001** | 4220 | — | **Bangalore.** Invisible to a Mumbai actor — use it for the RLS demo |
+
+### Depth ranking — the ones worth showing
+
+**TKT-4822** fires two rules and **TKT-4831** fires three. These are where the
+ranking matters: the answer leads with the lowest depth and reports the rest as
+knock-on effects, rather than listing everything that is wrong.
+
+### Refusals and edge cases
+
+These have **no** violations on purpose. Asking "why is this stuck?" should
+produce an honest "nothing is wrong here", and asking the question in the third
+column should produce a refusal.
+
+| Ticket | Order | Why it exists |
+|---|---|---|
+| **TKT-4832** | 6001 | Ask the customer's own question — *"Was I promised a free extended warranty?"* — and it refuses. No data supports an answer either way. Asking *"why is this stuck?"* instead reports the order's state, because that much is knowable |
+| **TKT-4839** | 6002 | Same shape — *"What part exchange value was I quoted?"* refuses. A commitment nothing records |
+| **TKT-4825** | 2231 | A healthy order with a second ticket against it. Asking about order 2231 answers once, from the order, rather than once per ticket |
+| **TKT-7788** | 5006 | *Summarise TKT-7788* — the id-collision case; the four digits must not resolve as order 7788 |
+| **TKT-9001** | 5007 | `<script>alert(1)</script>` in the body — injection that is not an instruction |
+
+### Order-level conditions
+
+Two rules do not hang off a ticket. Ask about the order directly in the console
+chat:
+
+| Ask | What fires |
+|---|---|
+| *Why is order 1770 stuck?* | `state_ledger_mismatch` — the state column disagrees with the event ledger. Seeded exactly once; the seed asserts that on boot |
+| *Why is order 5501 stuck?* | `seller_payout_hold` on its own |
+| *Why is order 3420 stuck?* | **three rules at once** — `inventory_double_allocation`, `seller_payout_hold`, `rc_transfer_stall`. The headline is the lowest depth; the rest are reported as knock-on |
+
+### Cohorts and aggregates — console chat, no ticket
+
+| Ask | Shape |
+|---|---|
+| *Show me all orders stuck in RC transfer* | `cohort` |
+| *How many tickets breached first response?* | `aggregate` |
+| *What is the difference between token paid and full paid?* | `concept` |
+| *What is the weather in Mumbai tomorrow?* | `unsupported` — refusal |
+
+---
+
 ## API
 
 Every endpoint resolves the caller from `X-Actor-Id` and runs inside one

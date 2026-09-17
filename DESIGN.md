@@ -126,6 +126,11 @@ re-seed gives a byte-identical database, which is what makes the evals
 repeatable. 42 healthy, 21 broken with one clean example per rule, 2
 unanswerable, plus seeded injection attempts. Counts asserted on boot.
 
+The healthy majority is deliberate — aggregates over a dataset where everything
+is broken mean nothing — but it does mean a ticket picked at random usually has
+nothing wrong with it, and the honest answer is to say so. README's *What to
+test where* maps each ticket to the condition it exercises.
+
 ---
 
 ## 5. Architecture
